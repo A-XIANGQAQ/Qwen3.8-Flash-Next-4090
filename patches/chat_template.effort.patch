@@ -1,0 +1,18 @@
+--- chat_template.jinja.bak-effort	2026-08-30 18:23:19.258657089 +0800
++++ chat_template.jinja	2026-08-30 18:39:23.147434827 +0800
+@@ -43,8 +43,14 @@
+     {{- raise_exception('No messages provided.') }}
+ {%- endif %}
+ {%- set reasoning_instructions = '' %}
+-{%- if enable_thinking is undefined or enable_thinking is true %}
++{%- set _none_effort = (reasoning_effort|default('xhigh')) == 'none' %}
++{%- if (enable_thinking is undefined or enable_thinking is true) and not _none_effort %}
+     {%- set resolved_reasoning_effort = reasoning_effort|default('xhigh') %}
++    {%- if resolved_reasoning_effort in ('high', 'max', 'ultracode', 'extreme') %}
++        {%- set resolved_reasoning_effort = 'xhigh' %}
++    {%- elif resolved_reasoning_effort in ('minimal',) %}
++        {%- set resolved_reasoning_effort = 'low' %}
++    {%- endif %}
+     {%- if resolved_reasoning_effort not in ('xhigh', 'medium', 'low') %}
+         {{- raise_exception('Unexpected reasoning effort ' ~ reasoning_effort ~ '. Supported types are xhigh (default), medium, and low.') }}
+     {%- endif %}
