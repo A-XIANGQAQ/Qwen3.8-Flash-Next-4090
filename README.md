@@ -30,7 +30,7 @@
 
 ## 实测摘要 (Measured Results)
 
-测试主机：单 4090 48GB + 38 核 CPU + 247GB RAM。**客户端计时口径**（sglang 日志吞吐字段不可信，见 TROUBLESHOOTING）。
+测试主机：单 4090 48GB + 38 核 CPU + 247GB RAM。**客户端计时口径**。
 
 | 指标 | 数值 |
 |---|---|
