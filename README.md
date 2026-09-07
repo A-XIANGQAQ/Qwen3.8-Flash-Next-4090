@@ -23,6 +23,7 @@
 | 模型 | `RadixArk/Qwen3.8-Flash-Next-NVFP4`（ModelScope **master**，126GiB / 206 shards） |
 | 引擎 | Lsglang 1.4.13（guqiong96 release `lsglang-v1.4.12` 内） + lk_moe 2.4.0 |
 | FlashAttention | `flash_attn-2.8.4+pr2751`（cp312 prebuilt wheel，SM89 必需） |
+| Chat Template | [froggeric v22.5](https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates)（官方兼容 Flash-Next，原生 effort 别名） |
 | 环境 | python 3.12 / torch 2.13.0+cu130 / CUDA 13 runtime（driver ≥ 580） |
 | GPU | 单 RTX 4090 **48GB** / sm89 / TP1 |
 

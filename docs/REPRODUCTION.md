@@ -51,17 +51,20 @@ modelscope download --model RadixArk/Qwen3.8-Flash-Next-NVFP4 \
   # 期望: {"index_shards": 206, "expected_shards": 206, "missing": [], "empty": []}
   ```
 
-## 5. Chat Template 补丁（可选但推荐）
+## 5. Chat Template：froggeric v22.5（推荐）
 
-模型模板的 `reasoning_effort` 严格枚举 `xhigh/medium/low`，客户端发 `high` 会 400。打映射补丁（参考 froggeric v22.4 思路，仅入口归一化不改行为）：
+模型自带的 RadixArk 模板对 `reasoning_effort` 严格枚举 `xhigh/medium/low`，客户端发 `high` 会 400。**推荐替换为 [froggeric/Qwen-Fixed-Chat-Templates](https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates) 顶层 `chat_template.jinja`（v22.5）**——作者声明兼容 Qwen3.8 Flash-Next，实测（2026-09）验证：effort 别名全收（`high/max/ultracode/extreme`→xhigh、`minimal`→low、`none/off`→关思考）、工具调用/中文/thinking 开关全部正常。
 
 ```bash
 cd /path/to/RadixArk--Qwen3.8-Flash-Next-NVFP4
-cp chat_template.jinja chat_template.jinja.bak-effort
-patch -p0 < /path/to/repo/patches/chat_template.effort.patch
+cp chat_template.jinja chat_template.jinja.bak-orig        # 备份原模板
+curl -L -o chat_template.jinja \
+  "https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates/resolve/main/chat_template.jinja?download=true"
 ```
 
-效果：`high/max/ultracode/extreme`→xhigh、`minimal`→low、`none`→关思考；其余行为不变。**需重启服务生效**。
+注意：v22.5 默认 effort 为 `medium`（原模板默认 xhigh）——客户端显式传 `reasoning_effort` 则不受影响。**需重启服务生效**。回滚：`cp chat_template.jinja.bak-orig chat_template.jinja`。
+
+（早期版本用手写映射补丁，已被 v22.5 原生功能取代。）
 
 ## 6. 启动 (Start)
 
