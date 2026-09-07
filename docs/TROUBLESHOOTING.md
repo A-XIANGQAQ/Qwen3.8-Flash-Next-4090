@@ -39,9 +39,9 @@
 ## 7. reasoning_effort 枚举 (Effort enumeration)
 
 - sglang API 层收：`none/minimal/low/medium/high/xhigh/max`（ultracode/extreme 在 API 层 400）
-- 模型模板只认 `xhigh/medium/low`，`high` 会 400
-- 解决：patches/chat_template.effort.patch（映射 high/max/ultracode/extreme→xhigh、minimal→low、none→关思考）
-- 补丁在模型目录的 chat_template.jinja，**重启才生效**；回滚：`cp chat_template.jinja.bak-effort chat_template.jinja`
+- 模型自带模板只认 `xhigh/medium/low`，`high` 会 400
+- **解决（推荐）**：替换为 froggeric v22.5 模板（原生收全别名，见 REPRODUCTION §5），实测 7 枚举全通过
+- 早期手写映射补丁已被 v22.5 取代
 
 ## 8. MTP 投机解码 (MTP speculation)
 
