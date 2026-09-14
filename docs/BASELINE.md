@@ -1,5 +1,12 @@
 # 实测基线 (Baseline)
 
+> [!IMPORTANT]
+> **勘误与复测（2026-09）**：本页 prefill 绝对数字（8k ~1195 t/s、256K ~1277 t/s）来自 2026-08-30 参数扫描期；
+> 后续在**服务空闲、客户端口径、温度受控**下复测修正为：**8k ≈ 1877–1999 t/s（4.1–4.4s）、254K ≈ 1784 t/s（142.5s）**、
+> decode 短上下文 ≈ 41.5–41.9 t/s（128K 上下文 36.5–38.7）。下方扫描表格的**相对结论**（chunk 4096 明显变差、
+> resident 6 层是保 256K 的天花板等）仍然成立，但绝对值请以复测为准——旧值与新值相差可达 50%，主要来自测量窗口/负载差异。
+> v2 栈（上游 Flash-Next + PLE 补丁）的实测见 [升级文档 §4](UPGRADE_UPSTREAM_FLASHNEXT.md)。
+
 ## 测试身份 (Test Identity)
 
 - 模型：RadixArk/Qwen3.8-Flash-Next-NVFP4（ModelScope master，126GB/206 shards）

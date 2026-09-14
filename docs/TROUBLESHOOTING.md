@@ -67,6 +67,18 @@ TomPython 项目记录的 HF revision（`7b7192...`）在 ModelScope **不存在
 
 `pgrep -f 'sglang serve'` 会匹配命令行含该字符串的 shell 自身（自杀 → exit 144）。用 `ps aux | grep '[s]glang serve'`。
 
+## 13.（新版）PLE 表 GPU 瞬态分配 OOM (Upstream PLE transient GPU alloc)
+
+上游 Flash-Next 实现（PR #37500）里 `Qwen4ExpPLELayer` 会**先在 GPU 构造整张 PLE 表再搬到 pinned 内存**——FP8 表也有 47.7GiB，48GB 卡必炸（`torch.OutOfMemoryError: Tried to allocate 47.69 GiB`）；且该 GPU 占位随后即被 `del`（权重实际由 loader 事后填进 pinned 副本），**纯浪费**。显式 `--ple-offload-embedding` 无效（炸在构造阶段）。修复：`patches/01_ple_cpu_alloc.patch`（一行，让表直接分配到 CPU）。详见 [升级文档 §3.1](UPGRADE_UPSTREAM_FLASHNEXT.md)。
+
+## 14. pinned 表与 memlock 限制 (memlock for pinned PLE table)
+
+pinned PLE 表需要 47.7GiB 锁页内存，系统默认 `ulimit -l` 常仅 8MB，pinned 分配会失败。启动脚本已内置 `ulimit -l unlimited`（因此需要 root——脚本自动 sudo 提权）。
+
+## 15. tilelang 0.1.12 编译不兼容 (tilelang version)
+
+CUDA graph 捕获期报 `error: #error "CUDA compiler and CUDA toolkit headers are incompatible"` = tilelang **0.1.12** 与本环境 nvcc 13.3（nvidia/cu13 pip 包）/ CCCL 13.0.3 组合冲突。**锁 tilelang==0.1.11**，升级环境时注意别被 `pip install -U` 带上去。
+
 ## 立即停止条件 (Stop conditions)
 
 host OOM / swap 持续增长 / NVIDIA Xid / 不可恢复 kernel fault / 同失败连续两次无新证据。
