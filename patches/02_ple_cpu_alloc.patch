@@ -1,8 +1,8 @@
 diff --git a/python/sglang/srt/models/qwen4_exp.py b/python/sglang/srt/models/qwen4_exp.py
-index 32a51803..bf09e955 100644
+index 21f120af1..c4e418f9e 100644
 --- a/python/sglang/srt/models/qwen4_exp.py
 +++ b/python/sglang/srt/models/qwen4_exp.py
-@@ -490,6 +490,13 @@ class Qwen4ExpNGramEmbedding(nn.Module):
+@@ -517,6 +517,13 @@ class Qwen4ExpNGramEmbedding(nn.Module):
              ),
              output_dtype=torch.bfloat16,
              use_attn_tp_group=self.use_attn_tp_ngram,

@@ -19,6 +19,27 @@
 
 ## 3. 环境安装 (Environment Install)
 
+**路线选择**：v3（官方 v0.5.20 基线，推荐）= 自建 wheel；v1（1.4.13）= 直接装 release wheel。
+
+### 3A. v3：自建「官方 v0.5.20 + lk_moe + PLE 补丁」
+
+```bash
+conda create -n lsglang-next python=3.12 && conda activate lsglang-next
+pip install torch==2.13.0 torchvision --index-url https://download.pytorch.org/whl/cu130
+pip install build setuptools-rust setuptools-scm      # 构建期依赖
+
+bash scripts/build_upstream_flashnext.sh              # 取 v0.5.20 + 打 3 个补丁 + 构建
+
+# 运行时依赖（版本必须按此锁定）
+pip install --no-deps <构建产物>/lsglang-1.6.0+flashnext.v0520-py3-none-any.whl
+pip install "lk_moe==2.4.1" "sglang-kernel==0.4.7" "tilelang==0.1.11" "flashinfer-python[cu13]==0.6.18"
+pip install ./flash_attn-2.8.4+pr2751-cp312-cp312-linux_x86_64.whl   # SM89 必需
+```
+
+> `sglang-kernel==0.4.7` 是 v0.5.20 的启动强校验；`tilelang` 必须 0.1.11（见 TROUBLESHOOTING #15）。
+
+### 3B. v1：安装 release wheel
+
 ```bash
 bash scripts/install.sh
 ```
@@ -68,9 +89,13 @@ curl -L -o chat_template.jinja \
 
 ## 6. 启动 (Start)
 
-编辑 `scripts/start_lsglang.sh`（模型路径、`SGLANG_BIN`、对外名、端口）后：
+编辑对应启动脚本（模型路径、`SGLANG_BIN`、对外名、端口）后：
 
 ```bash
+# v3（官方 v0.5.20 基线，推荐；内置 sudo 提权 + memlock + cd + 就绪等待）
+bash scripts/start_lsglang_upstream.sh
+
+# v1（1.4.13）
 bash scripts/start_lsglang.sh
 tail -f /tmp/lsglang.log   # 等 "The server is fired up and ready to roll!"
 ```

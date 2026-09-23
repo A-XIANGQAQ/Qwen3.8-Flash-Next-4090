@@ -69,7 +69,8 @@ TomPython 项目记录的 HF revision（`7b7192...`）在 ModelScope **不存在
 
 ## 13.（新版）PLE 表 GPU 瞬态分配 OOM (Upstream PLE transient GPU alloc)
 
-上游 Flash-Next 实现（PR #37500）里 `Qwen4ExpPLELayer` 会**先在 GPU 构造整张 PLE 表再搬到 pinned 内存**——FP8 表也有 47.7GiB，48GB 卡必炸（`torch.OutOfMemoryError: Tried to allocate 47.69 GiB`）；且该 GPU 占位随后即被 `del`（权重实际由 loader 事后填进 pinned 副本），**纯浪费**。显式 `--ple-offload-embedding` 无效（炸在构造阶段）。修复：`patches/01_ple_cpu_alloc.patch`（一行，让表直接分配到 CPU）。详见 [升级文档 §3.1](UPGRADE_UPSTREAM_FLASHNEXT.md)。
+上游 Flash-Next 实现（PR #37500）里 `Qwen4ExpPLELayer` 会**先在 GPU 构造整张 PLE 表再搬到 pinned 内存**——FP8 表也有 47.7GiB，48GB 卡必炸（`torch.OutOfMemoryError: Tried to allocate 47.69 GiB`）；且该 GPU 占位随后即被 `del`（权重实际由 loader 事后填进 pinned 副本），**纯浪费**。显式 `--ple-offload-embedding` 无效（炸在构造阶段）。修复：`patches/02_ple_cpu_alloc.patch`（一行，让表直接分配到 CPU）。详见 [升级文档 §5.1](UPGRADE_UPSTREAM_FLASHNEXT.md)。
+> 上游已用 meta device 方案在 **PR #39928（2026-09-20）** 修复同一问题，但**晚于 v0.5.20**——v3 栈仍需本补丁，下次上游同步时自然收敛。
 
 ## 14. pinned 表与 memlock 限制 (memlock for pinned PLE table)
 
@@ -78,6 +79,30 @@ pinned PLE 表需要 47.7GiB 锁页内存，系统默认 `ulimit -l` 常仅 8MB�
 ## 15. tilelang 0.1.12 编译不兼容 (tilelang version)
 
 CUDA graph 捕获期报 `error: #error "CUDA compiler and CUDA toolkit headers are incompatible"` = tilelang **0.1.12** 与本环境 nvcc 13.3（nvidia/cu13 pip 包）/ CCCL 13.0.3 组合冲突。**锁 tilelang==0.1.11**，升级环境时注意别被 `pip install -U` 带上去。
+
+## 16. sglang-kernel 版本强校验 (v0.5.20 requires >= 0.4.7)
+
+启动即 `Exception: sglang-kernel is installed with version 0.4.6.post1, which is less than the minimum required version 0.4.7`——v0.5.20 的硬校验。**只升这一个包**：`pip install "sglang-kernel==0.4.7"`（先 `--dry-run` 确认无连带升级；本项目实测只动它一个）。应急可绕（`SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK=1`），但内核 API 可能真不兼容，不建议长期使用。
+
+## 17. get_global_server_args() 在 v0.5.20 已废弃 (retired API)
+
+v0.5.20 把 `get_global_server_args()` 改为**硬报错**（值改由命名空间袋 `get_exec()/get_schedule()` 提供，避免读到过期的解析值）。lk_moe 集成补丁里 1 处踩到：`FusedMoE.get_max_num_group_batch_size` → 改 `get_schedule().chunked_prefill_size`（已入 `patches/01_lk_moe_v0520.patch`）。
+
+## 18. 测量窗口被外部流量污染 (measurement pollution)
+
+服务对局域网开放时，**外部客户端会不定时打 8000 口**。实测同一 145K 上下文 decode：独占时 **39.4 t/s**，撞上 2-3 个并发请求时掉到 **8.8 / 18.5 t/s**（服务端日志 `#running-req: 3`）。**任何性能结论前先查日志确认窗口独占**：测量区间内 `#running-req` ≤ 1 且只有自己那 1 条 HTTP 行。批测工具（bench_serving 等）同样会被污染。
+
+## 19. 启动脚本的 cwd 陷阱 (spawn worker chdir)
+
+启动脚本若在 **root 外壳**中执行（如 `su -` 后运行），cwd=`/root`；sglang 的 multiprocessing spawn 会让 worker `os.chdir(父进程 cwd)`，降权到普通用户的 worker 无法进入 `/root` → 调度器初始化即崩：
+`PermissionError: [Errno 13] Permission denied: '/root'`（伴随 `Rank 0 scheduler died during initialization`）。**修复**：启动脚本开头 `cd` 到公共目录（本仓库脚本已内置）。
+
+## 20. 构建产物形制（v0.5.20 自建 wheel）
+
+- 构建期需 `setuptools-rust` / `setuptools-scm`（`pip install build setuptools-rust setuptools-scm`）
+- 必须 `SGLANG_BUILD_RUST_EXTS=none`：否则收进 4 个 rust `.so`（`rust_extensions/_grpc|_server|_multimodal`、`mem_cache`），wheel 从 `py3-none-any` 变成平台包——与本项目验证过的形制不一致
+- 打包前清 `python/build` 与 `*.egg-info`：残留会让 wheel 混入上万条 `build/` 垃圾（实测 20MB → 76MB）
+- 目录跑错（在仓库根而非 `python/` 下执行 `python -m build`）会报 `does not appear to be a Python project`
 
 ## 立即停止条件 (Stop conditions)
 

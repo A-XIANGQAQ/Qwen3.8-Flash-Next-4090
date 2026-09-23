@@ -5,25 +5,28 @@
 > 后续在**服务空闲、客户端口径、温度受控**下复测修正为：**8k ≈ 1877–1999 t/s（4.1–4.4s）、254K ≈ 1784 t/s（142.5s）**、
 > decode 短上下文 ≈ 41.5–41.9 t/s（128K 上下文 36.5–38.7）。下方扫描表格的**相对结论**（chunk 4096 明显变差、
 > resident 6 层是保 256K 的天花板等）仍然成立，但绝对值请以复测为准——旧值与新值相差可达 50%，主要来自测量窗口/负载差异。
-> v2 栈（上游 Flash-Next + PLE 补丁）的实测见 [升级文档 §4](UPGRADE_UPSTREAM_FLASHNEXT.md)。
+> v3 栈（官方 v0.5.20 基线）的实测见 [升级文档 §4](UPGRADE_UPSTREAM_FLASHNEXT.md)。
 
 ## 测试身份 (Test Identity)
 
 - 模型：RadixArk/Qwen3.8-Flash-Next-NVFP4（ModelScope master，126GB/206 shards）
-- 引擎：Lsglang 1.4.13 + lk_moe 2.4.0 + flash_attn 2.8.4+pr2751
+- 引擎（当前 v3）：官方 sglang **v0.5.20** + lk_moe 2.4.1 + PLE 补丁 + flash_attn 2.8.4+pr2751；sglang-kernel 0.4.7 / tilelang 0.1.11
 - 主机：单 RTX 4090 48GB（SM89）+ 38 核 CPU + 247GB RAM
-- 配置：6 层 resident（0-5）、LK36、prefetch 关、省电关、mrr2、TP1、256K
-- **口径：客户端计时**（请求掐表 ÷ usage.prompt_tokens；8k 用唯一随机文本保证无前缀缓存，日志确认 cached-token=0）
+- 配置（v3 定稿）：6 层 resident（0-5）、LK36、prefetch 关、省电关、**mrr8**、TP1、256K、chunk 8192
+- **口径：客户端计时**（请求掐表 ÷ usage.prompt_tokens；8k 用唯一随机文本保证无前缀缓存）
+- **前提：窗口独占**——外部客户端不定时打服务，测速前查日志 `#running-req`（TROUBLESHOOTING #18）
 
-## 主结果 (Main Results)
+## 主结果 (Main Results · v3 / 2026-09-23)
 
 | 指标 | 数值 | 备注 |
 |---|---|---|
-| 8k prefill（无缓存） | **1195 t/s**（6.7s/8k） | 5 次均值，稳定 |
-| 256K prefill | **1277 t/s**（254k tokens / 199s） | 32 chunk 流水线不拖慢 |
-| decode 512 | **36~40 t/s** | 温度漂移 ±7%（见 TROUBLESHOOTING #11） |
-| 服务内部 gen throughput | 38~40 t/s | 仅参考 |
-| GPU 显存 | ~43GB / 48GB | KV 265216 + Mamba 61 states |
+| 8k prefill（无缓存） | **1968–1994 t/s**（4.1–4.2s） | 3 个连续样本 |
+| 64K prefill | **1887 t/s** | |
+| 254K prefill | **1710 t/s**（254k tokens / 149.2s） | |
+| decode 512（短） | **42.5 t/s** | 温度漂移 ±7%（#11） |
+| decode @73K / @145K | **42.0 / 39.4 t/s**（ITL p50 24ms） | 长上下文几乎不衰减 |
+| 并发聚合（256 tok/req） | 1/2/4/8 = **42.5 / 47.7 / 72.3 / 108 t/s** | 8 并发为甜点（mrr8 的依据） |
+| 模型加载 | ~5.5 分钟 | 显存 41.7GB / 48GB |
 | KV 页表 | 265216 tokens | ≥262144 才保 256K |
 
 ## resident 层数扫描 (Resident Layer Sweep)
