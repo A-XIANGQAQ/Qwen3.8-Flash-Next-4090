@@ -3,13 +3,16 @@
 ## 1. 启动 (Start)
 
 ```bash
-bash scripts/start_lsglang.sh
-# 或长 SSH 会话用 nohup（脚本内已 nohup）
+# v3（当前）：自动 sudo 提权 + ulimit -l unlimited + cd + 就绪等待（失败即报错退出）
+bash scripts/start_lsglang_upstream.sh
+
+# v1（历史）：bash scripts/start_lsglang.sh
 tail -f /tmp/lsglang.log
 ```
 
 - 就绪标志：`The server is fired up and ready to roll!`（首次 ~5 分钟）
 - 期间 `/health` 可能短暂 503，属正常
+- ⚠️ 脚本必须在**普通用户**的 shell 里运行（不要 `su -` 后跑）——root 外壳的 cwd 会让 spawn 出的 worker 崩溃（TROUBLESHOOTING #19）
 
 ## 2. 观察 (Observe)
 
@@ -66,7 +69,7 @@ curl -s localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
 - 输入 > 262144 tokens → HTTP 400（context-length 上限）
 - prompt + max_tokens > 265216 → 400（准入）
 - 生成长度到 262144 总长 → 截断（finish_reason=length）
-- 多客户端并发：`--max-running-requests 2`，超出排队
+- 多客户端并发：`--max-running-requests 8`（实测并发甜点，聚合 108 t/s @8 并发；超 8 排队）
 
 ## 7. GUI / 无头主机共存 (Headless Notes)
 

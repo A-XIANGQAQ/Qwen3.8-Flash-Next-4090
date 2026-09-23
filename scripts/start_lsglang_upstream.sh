@@ -1,17 +1,20 @@
 #!/bin/bash
 # ==========================================
 # Qwen3.8-Flash-Next-NVFP4 @ single RTX 4090 48GB (SM89)
-# v2 启动脚本：上游 Flash-Next + lk_moe + PLE CPU 补丁（见 docs/UPGRADE_UPSTREAM_FLASHNEXT.md）
-# 与 v1 脚本的差异：
-#   - --ple-offload-embedding 显式开启（新版自动解析可能因 dtype 判定不启用）
+# v3 启动脚本：官方 sglang v0.5.20 + lk_moe + PLE CPU 补丁（见 docs/UPGRADE_UPSTREAM_FLASHNEXT.md）
+# 与 v1/v2 脚本的差异：
+#   - --ple-offload-embedding 显式开启（自动解析可能因 dtype 判定不启用）
 #   - 需要 root 放开 memlock（PLE pinned 表 47.7GiB）→ 脚本自动 sudo 提权
 #   - 模型进程仍以你的普通用户身份运行（不是 root）
+#   - cd 到公共目录：spawn 出的 worker 会 chdir 到父进程 cwd，
+#     脚本若在 root 外壳里跑（cwd=/root）子进程会 PermissionError 崩溃
 # Usage: 修改下方配置变量后直接运行（会提示一次 sudo 密码）
 # ==========================================
 set -e
 
 if [ "$(id -u)" -ne 0 ]; then exec sudo -E bash "$0" "$@"; fi
 ulimit -l unlimited
+cd /tmp                              # spawn worker 的 chdir 目标，必须在所有用户下可访问
 RUN_USER="${SUDO_USER:-$(id -un)}"   # 以调用者身份跑模型
 
 # ---------- 配置区（按需修改） ----------
@@ -51,7 +54,7 @@ runuser -u "$RUN_USER" -- env \
         --port "$PORT" \
         --trust-remote-code \
         --tensor-parallel-size 1 \
-        --max-running-requests 2 \
+        --max-running-requests 8 \
         --chunked-prefill-size 8192 \
         --max-total-tokens 265216 \
         --mem-fraction-static 0.95 \
@@ -63,5 +66,14 @@ runuser -u "$RUN_USER" -- env \
         --tool-call-parser qwen3_coder \
         > "$LOG" 2>&1 &
 
-echo "Lsglang (upstream v2) started as $RUN_USER, log: $LOG"
-echo "就绪标志: The server is fired up and ready to roll!（首次 ~4-5 分钟）"
+echo "Lsglang (官方 v0.5.20 + lk_moe) started as $RUN_USER, log: $LOG"
+
+echo "⏳ 等待模型就绪（首次 ~5 分钟；失败会立即报错退出）..."
+for i in $(seq 1 240); do
+    if curl -s "http://localhost:$PORT/health" &>/dev/null; then echo "✅ 模型已就绪！"; break; fi
+    if ! pgrep -f "sglang serve" >/dev/null 2>&1; then
+        echo "❌ 启动失败：服务进程已退出，请查看日志: tail -50 $LOG"; exit 1
+    fi
+    sleep 5
+done
+curl -s "http://localhost:$PORT/health" &>/dev/null || echo "⚠️ 尚未就绪，继续观察日志: tail -f $LOG"
