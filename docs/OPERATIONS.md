@@ -69,7 +69,13 @@ curl -s localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
 - 输入 > 262144 tokens → HTTP 400（context-length 上限）
 - prompt + max_tokens > 265216 → 400（准入）
 - 生成长度到 262144 总长 → 截断（finish_reason=length）
-- 多客户端并发：`--max-running-requests 8`（实测并发甜点，聚合 108 t/s @8 并发；超 8 排队）
+- 多客户端并发：`--max-running-requests` **按场景取舍**（超出排队）
+  | 取值 | 适用 | 实测 |
+  |---|---|---|
+  | **2** | 多路并行的长任务，优先"单流顺畅" | 每路 47.7/2≈**23.8 t/s** |
+  | **8** | 批量/短请求，优先聚合吞吐 | 聚合 **108 t/s** @8 并发 |
+
+  > 为什么不是越大越好：只要有 ≥2 路在跑，**另一路的 prefill 会被切成 8192-token 块（每块吃满 GPU ≈4 秒）插进你的 decode 之间**——正在看的那一路就"突然不吐字"。并发越高插队越频繁；要完全无停顿只能串行（1 路），但那样吞吐最低。本项目生产用 **2**。
 
 ## 7. GUI / 无头主机共存 (Headless Notes)
 

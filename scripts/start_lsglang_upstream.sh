@@ -54,7 +54,7 @@ runuser -u "$RUN_USER" -- env \
         --port "$PORT" \
         --trust-remote-code \
         --tensor-parallel-size 1 \
-        --max-running-requests 8 \
+        --max-running-requests 2 \
         --chunked-prefill-size 8192 \
         --max-total-tokens 265216 \
         --mem-fraction-static 0.95 \
