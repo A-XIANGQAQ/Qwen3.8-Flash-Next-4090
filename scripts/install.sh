@@ -2,6 +2,8 @@
 # ==========================================
 # Qwen3.8-Flash-Next-NVFP4 @ 4090: 环境安装
 # conda env (py3.12) + torch cu130 + Lsglang wheel + flash_attn PR2751 wheel
+# ⚠️ 历史路线（v1，Lsglang 1.4.13）。当前生产为 v4 = FreeToken，
+#    安装步骤见 docs/REPRODUCTION.md §3A（不需要 flash_attn wheel）
 # 素材来源: guqiong96/Lsglang release lsglang-v1.4.12 (内含 1.4.13 wheel)
 # ==========================================
 set -euo pipefail
