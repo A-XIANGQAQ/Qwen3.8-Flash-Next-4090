@@ -3,12 +3,8 @@
 一份面向**单卡 RTX 4090（SM89，48GB）**的 Qwen3.8-Flash-Next-NVFP4 混合推理部署指南。
 
 > [!WARNING]
-> 社区实验复现，非官方支持方案。请勿把结果表述为"SM89 已获上游官方支持"。
->
-> 当前 v4 栈（FreeToken）依赖**三个未上游化的本地补丁**（见 [已验证组合](#已验证组合-verified-stack)），
-> 其中 decode-interleave 对应的上游 PR #484 仍是 OPEN 状态。
-> 历史 sglang 路线另需 SM89 专用的 FlashAttention PR #2751 补丁（由 Lsglang release 提供 prebuilt wheel），
-> 该需求**不适用于 v4**（FreeToken 走 flashinfer，不用 flash_attn wheel）。
+> 社区实验复现，非官方支持方案。请勿表述为"SM89 已获上游官方支持"。
+> v4 栈依赖**三个未上游化的本地补丁**（其中 decode-interleave 对应的上游 PR #484 仍是 OPEN）。
 
 ## 为什么有这个项目
 
@@ -54,86 +50,27 @@
 
 ## 实测摘要 (Measured Results)
 
-测试主机：单 4090 48GB + 38 核 CPU + 247GB RAM。**客户端计时口径**。以下为 2026-09-24 v4 栈（FreeToken 0.1.3）实测：
+测试主机：单 4090 48GB + 38 核 CPU + 247GB RAM。同机、客户端计时、独占窗口：
 
-| 指标 | 数值 | 测量条件 |
+| 指标 | **v4（FreeToken 0.1.3）** | v3（sglang v0.5.20） |
 |---|---|---|
-| 模型加载 | **~39 秒** | 206 shards 权重 + 专家 banks |
-| decode 512（短上下文） | **64.4 t/s** | moe-cache-rate 0.40 |
-| decode @73K 上下文 | **62.6–63.6 t/s** | moe-cache-rate 0.40 |
-| decode @145K 上下文 | **60.2 t/s** | moe-cache-rate 0.35（未复测 0.40） |
-| prefill 64K | **2140 t/s** | |
-| prefill 254K | **2081–2086 t/s**（122–149s） | |
-| prefill 8K | **方差极大**（实测 371–1566 t/s） | ⚠️ 见下 |
-| 并发聚合（1/2/4/8） | **35.6 / 54.0 / 64.2 / 63.7 t/s** | ⚠️ 墙钟口径（**含 TTFT**）；mrr=2、cache-rate 0.35 |
-| 并发每流（1/2/4/8，纯解码） | **58.1 / 48.0 / 49.5 / 49.0 t/s** | 同上，分母只取 token 间隔，不含 TTFT |
-| TTFT（短请求） | **3.4s**（前缀全命中也要 ~4.0s） | ⚠️ 见下 |
-| 上下文 | 262144（256K）✅ | KV 单一共享池 265216 tokens |
-| GPU 显存 | ~44–46GB / 48GB | 随 moe-cache-rate 与 mrr 变化 |
-| host RAM | 峰值 ~200GB（126GiB 权重 + 63.3G 专家 banks） | |
+| 模型加载 | **~39 秒** | ~5.5 分钟 |
+| decode（短 / 73K / 145K 上下文） | **64.4 / 62.6 / 60.2 t/s** | 42.5 / 42.0 / 39.4 |
+| prefill（64K / 254K） | **2140 / 2081 t/s** | 1887 / 1710 |
+| 短请求 TTFT | 3.4s | 0.42s |
+| Anthropic `/v1/messages` | ✅ 原生 | ❌ |
+| 上下文 / 显存 | 256K / 44–46GB | 256K / 41.7GB |
 
-> ⚠️ **8K prefill 方差极大**：同配置实测出现过 371 / 938 / 1216 / 1347 / 1566 t/s 多个值，
-> 公开引用请给区间并注明窗口是否独占、缓存冷热。**不要引用单点值。**
-> ⚠️ **短请求有 ~3.4s 固定开销**（sglang 路线是 0.42s）——本栈适合长上下文与吞吐场景，不适合高频短请求。
-> ⚠️ **并发有两个口径，别混用**：**聚合** = 总 token ÷ 墙钟（**把 TTFT 算进分母**，所以 N=1 时反而低于单流速率）；
-> **每流** = token ÷ 各 token 间隔之和（纯解码）。引用时必须写明是哪一个。
-> 本页跨引擎对照里，v3 的历史值是**不含 TTFT** 的口径，与 v4 的聚合值**不可直接比**——已在表格中标注。
+**取舍**：v4 在长上下文 decode（+50%）、超长 prefill（+22%）、加载（8×）和 Anthropic 协议支持上明显更好；
+代价是 8K prefill、短请求延迟（**3.4s 固定开销** vs 0.42s）和高并发扩展性不如 v3，
+多路并行时仍会被长 prefill 打断吐字（打上 #484 补丁后最长停顿 17.7s → 7.5s）。
+两条路线的脚本与补丁都在仓库里，可双向回滚。
 
-**数据出处**：主矩阵（8K/64K/145K、并发）来自 2026-09-23 的独占窗口实测（`moe-cache-rate 0.35`、`mrr=2`）；
-decode 短上下文的 64.4 与 73K 的 62.6–63.6 来自 2026-09-24 的调优对照（`moe-cache-rate 0.40`），为单次测量。
-两者配置不同、时间不同，**不要跨行组合引用**。调优的相对结论见下表。
-
-### 与 v3（sglang）的取舍 (v4 vs v3 Trade-offs)
-
-v4 **不是全面更快**，是一次明确的取舍。同一台机器、客户端计时：
-
-| 维度 | v4（FreeToken） | v3（sglang v0.5.20） | 结果 |
-|---|---|---|---|
-| decode @73K | **62.6–63.6 t/s** | 42.0 t/s | ✅ **+49~51%** |
-| decode @145K | **60.2 t/s** | 39.4 t/s | ✅ **+53%** |
-| prefill 254K | **2081 t/s**（122s） | 1710 t/s（149s） | ✅ +22% |
-| 模型加载 | **~39 秒** | ~5.5 分钟 | ✅ **~8×** |
-| Anthropic 接口 `/v1/messages` | ✅ 原生 | ❌ 无 | ✅ |
-| prefill 8K | 371–1566 t/s | 1968–1994 t/s | ❌ ~0.2–0.8× |
-| 短请求固定开销 | **3.4s** | 0.42s | ❌ 8× |
-| 并发 4 路 | 每流纯解码 **49.5 t/s**（聚合 64.2，含 TTFT） | 历史值 72.3（**口径不含 TTFT**） | ⚠️ **口径不同，不可直接比** |
-| 多流冻结（长 prefill 插队） | 最长 17.7s → **7.5s**（打 #484 后） | 切成 4s 块插队 | ❌ 仍劣 |
-| flash_attn wheel 依赖 | 无（走 flashinfer） | 需 SM89 专用 PR #2751 wheel | ✅ 部署更简单 |
-
-> 选型建议：**长上下文单流 / 需要 Anthropic 协议 / 在意加载时间** → v4；
-> **高频短请求 / 高并发批量 / 在意 8K prefill** → v3（脚本与补丁仍在本仓库，可直接回滚）。
-
-> **测速前必须确认窗口独占**：外部客户端会不定时打服务端口，实测把 145K decode 从 39.4 压到 8.8 t/s（并发污染）。
-> 查服务日志 `#running-req` 与 HTTP 行确认（[TROUBLESHOOTING #18](docs/TROUBLESHOOTING.md)）。**同时控制温度**（[#11](docs/TROUBLESHOOTING.md)）。
-
-### 第三方工具交叉验证 (Cross-check with llm_speedtest)
-
-用 [gengchaogit/llm_speedtest](https://github.com/gengchaogit/llm_speedtest) v3 Python 后端版（FastAPI + WebSocket，
-走它自己的测量代码）对 v4 栈独立复测。2026-09-24，独占窗口，3 次重复：
-
-| 提示词长度 | Prefill t/s | Decode t/s | TTFT |
-|---|---|---|---|
-| 1,000 | 354.6 / 355.3 | 62.3 / 65.9 | 2822 / 2817 ms |
-| 8,000 | 2226.1 / 2245.9 / 2231.6 | 64.5 / 65.8 / 63.6 | 3597 / 3565 / 3587 ms |
-
-> **口径不同于本仓库**，不能直接对表：
+> 完整数据、测量条件、口径说明（并发有「聚合/每流」两种口径，跨引擎不可直接比）、
+> 单变量调优结论，以及第三方工具 [llm_speedtest](https://github.com/gengchaogit/llm_speedtest)
+> 的交叉验证（decode 62–66 t/s 独立佐证），见 [docs/BASELINE.md](docs/BASELINE.md)。
 >
-> | | 本仓库 `bench_once.py` | llm_speedtest |
-> |---|---|---|
-> | prefill 分母 | 总墙钟（含 32 token 解码） | **TTFT**（首个内容 token） |
-> | 传输 | 非流式 | 流式 |
-> | 并发聚合 | — | 总 token ÷ 墙钟（含 TTFT） |
-
-**两点结论**：
-
-1. **decode 得到独立佐证**：62–66 t/s，与本页 FreeToken 的 60–65 t/s 区间吻合（重复性好，3 次波动 <4%）。
-2. **prefill 列不可当绝对吞吐用**：该列 = `prompt_tokens ÷ TTFT`，而 TTFT 里含着 ~2.8 秒的固定开销。
-   证据是 1,000 token 那档掉到 **355 t/s** —— 用两次测量做分解：
-   `(8000−1000) ÷ (3.587−2.817) ≈ 9,100 t/s` 是边际 prefill 速率，其余 ~2.7s 是固定开销。
-   所以 8,000 那档的 2,226 t/s **既低估了边际算力、又因不含生成时间而高于墙钟口径**（对照本页 64K 的 2,140 t/s）。
-
-> 用该工具时注意：它的 `timeout` 字段单位是**毫秒**（前端输入框 `min=1000`），
-> 对 <1024 token 的提示词直接当基准值用——填成秒会得到几毫秒的超时、请求必然失败。
+> 测速前务必确认窗口独占（[TROUBLESHOOTING #18](docs/TROUBLESHOOTING.md)）并控制温度（[#11](docs/TROUBLESHOOTING.md)）。
 
 ## 快速开始 (Quick Start)
 
@@ -162,23 +99,19 @@ bash scripts/start_freetoken.sh
 ## 文档 (Docs)
 
 - [完整复现](docs/REPRODUCTION.md)
-- [升级记录：v4 切换 FreeToken / v3 sglang v0.5.20 / v2](docs/UPGRADE.md)
-  （原文件名 `UPGRADE_UPSTREAM_FLASHNEXT.md`，已重命名）
+- [升级记录（v4 FreeToken / v3 sglang / v2 / v1）](docs/UPGRADE.md)
 - [运维手册](docs/OPERATIONS.md)
 - [排障（含 FreeToken 专属坑：/health 提前 200、KV 默认过小、moe-strategy auto 陷阱等）](docs/TROUBLESHOOTING.md)
-- [实测基线 + 参数扫描结论](docs/BASELINE.md)
+- [实测基线 + 调优结论 + 交叉验证](docs/BASELINE.md)
 
 ## 与相关项目的关系 (Relation to other projects)
 
-- **FlashML-org/FreeToken**（当前引擎）：MoE offload 推理运行时，同时提供 OpenAI 与 Anthropic 兼容 API。
-  本项目在其 `0.1.3` 上验证 4090 单卡 NVFP4 路线，并携带三个本地补丁（端口解耦 / workload 注册 / decode-interleave）；
-  三者均未上游化，`uv pip install -U` 后需重打（启动脚本内置自检）。
-- **官方 sglang**：v3 路线（已转为历史）。官方 sglang **main 已含 qwen4_exp**（PR #36497 经 #37500 于 2026-09-08 合并）；
-  **v0.5.20（2026-09-18）是首个含它的正式 tag**。官方硬件矩阵仍不含 4090/SM89。
-- **Lsglang**（guqiong96）：v1/v2 路线的引擎与 lk_moe 混合推理来源。注意 Lsglang 1.4.14+ / 1.5.x 主线分别转向
-  GLM-5.3 与 DeepSeek-V4.1，**其主线 release 均不含 Flash-Next**（v1.5.6 已核验）。
-- **lovedheart/sglang feat/qwen38-flash-next**：v1 的模型支持层（qwen4_exp：PLE/ngram/QSA/GDN），2026-08-27 后冻结。
-- **TomPython/Qwen-3.8-Flash-Next**：双卡参考项目；本项目的单卡路线与其互补（直跑 vs Docker）。
+- **FlashML-org/FreeToken**（当前引擎）：MoE offload 推理运行时，提供 OpenAI 与 Anthropic 兼容 API。
+  本项目在其 `0.1.3` 上验证 4090 单卡 NVFP4 路线，并携带三个未上游化的本地补丁。
+- **官方 sglang**：v3 路线（已转为历史）。v0.5.20 是首个含 qwen4_exp 的正式 tag；官方硬件矩阵仍不含 4090/SM89。
+- **Lsglang**（guqiong96）：v1/v2 的引擎与 lk_moe 来源；主线已转向 GLM-5.3 / DeepSeek-V4.1，release 均不含 Flash-Next。
+- **lovedheart/sglang**：v1 的模型支持层，2026-08-27 后冻结。
+- **TomPython/Qwen-3.8-Flash-Next**：双卡参考项目；本项目为单卡路线，两者互补。
 
 ## License
 
