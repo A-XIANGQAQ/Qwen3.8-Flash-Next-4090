@@ -49,7 +49,7 @@ bash scripts/start_freetoken.sh
 
 | 补丁 | 解决什么 | 不打的后果 |
 |---|---|---|
-| [04 FT_DIST_PORT](../patches/04_ft_dist_port.patch) | 内部 rendezvous 默认监听「API 端口+1」，会撞 nginx 的 8001 | 无法维持 8000/8001 的既有端口布局 |
+| [04 rendezvous 自动避让](../patches/04_ft_auto_dist_port.patch) | 内部 rendezvous 默认监听「API 端口+1」，该端口被占用（反代在相邻端口 / 第二个实例 / 上个进程没退干净）就启动失败 | 相邻端口被占即无法启动 |
 | [05 qwen3.8 workload](../patches/05_ft_workload_qwen38.patch) | 注册本模型的专家几何（2.64MB，`ft bench bw` 默认按 7.61MB 测） | `ft bench bw --model qwen3.8-flash-next` 跑不了 |
 | [06 decode-interleave](../patches/06_ft_decode_interleave.patch) | prefill 无条件优先导致长 prompt 整块占住 GPU | 正在解码的流最长冻结 17.7s「不吐字」 |
 

@@ -19,6 +19,8 @@
 #   · cd 到公共目录：spawn 出的 worker 会 chdir 到父进程 cwd，脚本若在 root 外壳里跑
 #     （cwd=/root）子进程会 PermissionError 崩溃
 #   · 就绪判据是日志行 "ready to serve"，不是 /health —— /health 在加载完成前就返回 200（上游 #537）
+#   · 内部 rendezvous 端口由补丁 04 自动挑空闲的（从 API 端口+1 起找），所以不需要
+#     为它腾地方：反向代理占着 8001、同机跑第二个实例、上个进程没退干净，都不会再挡启动
 #
 # Usage: 修改下方配置变量后直接运行（会提示一次 sudo 密码）
 # ==========================================
@@ -33,7 +35,8 @@ RUN_USER="${SUDO_USER:-$(id -un)}"   # 以调用者身份跑模型
 MODEL_DIR=/path/to/RadixArk--Qwen3.8-Flash-Next-NVFP4   # 模型目录（ModelScope 下载）
 SERVED_NAME=Qwen3.8-Flash-Next                          # 对外模型名
 PORT=8000                                               # API 端口（客户端零改动）
-DIST_PORT=8002                                          # 内部 rendezvous；默认 = API 端口+1，会撞 nginx 的 8001
+DIST_PORT=                                              # 内部 rendezvous；**留空 = 自动挑空闲端口**（推荐）
+                                                        # 只有需要固定端口时才填，例如 8002
 LOG=/tmp/ft.log                                         # 日志路径
 FT_BIN=/path/to/ft-venv/bin/ft                          # FreeToken 可执行（uv venv 产出）
 SITE_PACKAGES=/path/to/ft-venv/lib/python3.12/site-packages   # 补丁自检与重打用
@@ -44,8 +47,8 @@ STOP_GUI=auto                                           # auto = 检测到 light
 # FreeToken 升级（uv pip install -U）会覆盖 site-packages，三个补丁会静默丢失。
 # 缺任何一个都直接退出，而不是带着半套补丁启动。
 missing=0
-grep -q "FT_DIST_PORT" "$SITE_PACKAGES/freetoken/server/args.py" 2>/dev/null \
-    || { echo "⚠️  补丁 04（FT_DIST_PORT）未应用"; missing=1; }
+grep -q "find_free_dist_port" "$SITE_PACKAGES/freetoken/server/args.py" 2>/dev/null \
+    || { echo "⚠️  补丁 04（rendezvous 自动避让）未应用"; missing=1; }
 grep -q "qwen3.8-flash-next" "$SITE_PACKAGES/freetoken/moe/benchbw.py" 2>/dev/null \
     || { echo "⚠️  补丁 05（qwen3.8 workload）未应用"; missing=1; }
 [ -f "$SITE_PACKAGES/freetoken/scheduler/interleave.py" ] \
@@ -54,7 +57,7 @@ if [ "$missing" -ne 0 ]; then
     cat <<EOF
     FreeToken 可能被升级过，补丁已丢失。重打：
       cd "$SITE_PACKAGES"
-      patch -p1 < patches/04_ft_dist_port.patch
+      patch -p1 < patches/04_ft_auto_dist_port.patch
       patch -p1 < patches/05_ft_workload_qwen38.patch
       patch -p2 < patches/06_ft_decode_interleave.patch
 EOF
@@ -62,25 +65,27 @@ EOF
 fi
 
 # ---------- 端口检查 ----------
+# API 端口是硬要求（客户端按这个连），被占用就退出。
+# rendezvous 端口不用检查：补丁 04 会让 FreeToken 自己从 API 端口+1 起找空闲端口。
 if ss -ltn 2>/dev/null | grep -q ":$PORT "; then
     echo "⚠️  端口 $PORT 已被占用（若在跑 sglang: pkill -f 'sglang serve'）"; exit 1
 fi
-if ss -ltn 2>/dev/null | grep -q ":$DIST_PORT "; then
-    echo "⚠️  rendezvous 端口 $DIST_PORT 已被占用"; exit 1
+if [ -n "$DIST_PORT" ] && ss -ltn 2>/dev/null | grep -q ":$DIST_PORT "; then
+    echo "⚠️  指定的 rendezvous 端口 $DIST_PORT 已被占用（留空 DIST_PORT 可自动避让）"; exit 1
 fi
 
 # 126GiB 权重 + 专家 host banks 峰值 ~200GB 主机内存：先丢页缓存再起
 sync && echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
 
 : > "$LOG"; chown "$RUN_USER" "$LOG"
-echo "🚀 启动 FreeToken（API $PORT / rendezvous $DIST_PORT / nginx 8001 不受影响）..."
+echo "🚀 启动 FreeToken（API $PORT / rendezvous ${DIST_PORT:-自动} / 相邻端口被占用会自动绕开）..."
 runuser -u "$RUN_USER" -- env \
     PATH="/usr/local/cuda/bin:/usr/bin:/bin" \
     CUDA_DEVICE_ORDER=PCI_BUS_ID \
     CUDA_VISIBLE_DEVICES=0 \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
-    FT_DIST_PORT="$DIST_PORT" \
+    ${DIST_PORT:+FT_DIST_PORT="$DIST_PORT"} \
     FREETOKEN_MAMBA_SSM_DTYPE=bfloat16 \
     nohup "$FT_BIN" serve \
         --model "$MODEL_DIR" \

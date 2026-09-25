@@ -169,12 +169,23 @@ FreeToken 的 `/health` 在模型加载完成前就返回 200（上游 **#537**�
 --moe-cache-rate 0.40   # 给 KV 留空间
 ```
 
-## 🟡 23. 内部 rendezvous 端口撞 nginx
+## 🟡 23. 内部 rendezvous 端口被占用导致启动失败（已自动绕开）
 
-FreeToken 的内部 torch.distributed rendezvous 默认监听 **API 端口 + 1**。本项目要让 API 占 8000、
-nginx 继续占 8001 —— 默认行为会直接撞上 8001，服务起不来。
+FreeToken 的内部 torch.distributed rendezvous 默认监听 **API 端口 + 1**，一旦该端口被占用就直接启动失败。
+实际部署里这很常见，不只是"反向代理正好在下一个端口"：
 
-**修复**：`patches/04_ft_dist_port.patch` 允许用 `FT_DIST_PORT` 覆盖，本项目用 **8002**。
+- 反代/Nginx 在相邻端口（本项目 8001 就是这种情况）
+- 同机起了第二个实例
+- 上一个进程没退干净，端口还在 TIME_WAIT / 仍被 LISTEN
+
+**修复**：`patches/04_ft_auto_dist_port.patch` —— `launch_server()` 在**父进程**里解析一次，
+从 API 端口+1 起向上找第一个能 bind 的端口，整段占用则退回内核分配的临时端口，并打日志说明。
+
+> ⚠️ 为什么必须在父进程解析：rendezvous 地址要求**各 rank 完全一致**，而 worker 侧的
+> `distributed_addr` 是个 property，若各进程自行扫描就会各挑各的、握手失败。
+> worker 由 `multiprocessing` spawn 产生、继承父进程环境，因此读到同一个值。
+
+仍需固定端口时，显式设 `FT_DIST_PORT` 即可（它作为起始偏好；被占用时打 WARNING 并顺延）。
 
 ## 🟡 24. `--moe-strategy auto` 会静默变成 hybrid（实测慢 27%）
 
