@@ -101,5 +101,5 @@ Anthropic 格式对应 `usage.cache_read_input_tokens`。
 - 126GB 权重 + 专家 banks 需 ~200GB RAM——若主机有桌面环境，建议服务运行期间关闭 GUI（LightDM 等）。
   `scripts/start_freetoken.sh` 会在检测到 lightdm 时自动停掉（`STOP_GUI=off` 可关掉该行为）
 - 远程访问：SSH local forwarding 或 loopback + 反向代理（nginx 需配 `proxy_read_timeout`，默认 60s 会掐断长请求 → 502；建议 900s）
-- 端口：`8000` API / `8001` nginx。FreeToken 内部 rendezvous 端口**自动挑空闲的**
-  （补丁 04，从 API 端口+1 起找，被占用就顺延并打日志）；需要固定时显式设 `FT_DIST_PORT`
+- 端口：只需指定 API 端口。FreeToken 内部 rendezvous 端口**自动挑空闲的**（补丁 04，
+  从 API 端口+1 起向上找，被占用就顺延并打日志）；需要固定时显式设 `FT_DIST_PORT`
