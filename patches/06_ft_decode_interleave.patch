@@ -1,0 +1,549 @@
+# 补丁 06：decode-interleave（每 N 个 prefill 步插一个 decode 步）
+#
+# 目标：freetoken==0.1.3 源码（<venv>/lib/python3.12/site-packages）
+# 原因：上游 prefill 无条件优先，长 prompt 的 prefill 会整块占住 GPU，正在解码的流
+#       「突然不吐字」——本机实测最长冻结 17.7s（上游 #483）。本补丁是上游 PR #484 的本地重放。
+#       N 必须按自己的 prompt 长度定：作者在 PR 里推荐的 8×4090 场景 N=8，而 43K prompt
+#       只有 6 个 prefill 块，N=8 永远到不了阈值、完全无效。本项目用 N=2（17.7s → 7.5s）。
+# 注意：本 diff 的 docstring 保留了 PR 早期文本（引用 267s/317s 的旧配置数字）；
+#       上游 PR 已自行勘误为「77s → 13.03s」，引用时以 PR 当前口径为准。
+# 打法：cd <venv>/lib/python3.12/site-packages && patch -p2 < patches/06_ft_decode_interleave.patch
+#       （diff 里测试文件的路径没带 python/ 前缀，-p2 会把它落成 site-packages/scheduler/test_interleave.py
+#        这个游离目录——无害，介意可删）
+# 上游：PR #484「feat(scheduler): interleave decode steps into long prefill runs」（OPEN，Closes #483）
+#
+# 验证：本补丁与 04/05 一起打进干净 freetoken==0.1.3 后，得到的 freetoken/ 树与生产 venv 逐字节一致。
+#
+diff --git a/python/freetoken/engine/config.py b/python/freetoken/engine/config.py
+index 44c5a38e7..d90c02ecd 100644
+--- a/python/freetoken/engine/config.py
++++ b/python/freetoken/engine/config.py
+@@ -77,6 +77,11 @@ class EngineConfig:
+     # DSV4 window/full ratio directly. Used only when swa_num_pages_override is None (a runtime
+     # rebuild can pin an absolute window instead).
+     swa_full_tokens_ratio: float = 0.2
++    # Force one decode step after this many consecutive prefill steps, so a long chunked
++    # prefill cannot starve in-flight decodes. None/0 keeps the historical prefill-first
++    # order (the scheduler's own TODO names this: "support other policies: e.g. DECODE
++    # first"). At 8 the cost is ~1% of prefill wall time.
++    decode_interleave_every: int | None = None
+     # Absolute window-pool size in the pool's own pages (usable, dummy excluded); None -> use the
+     # ratio default above. A runtime cache rebuild sets this (num_swa_pages) to pin the window
+     # regardless of the full anchor; the ratio is the startup default and the fallback.
+diff --git a/python/freetoken/scheduler/interleave.py b/python/freetoken/scheduler/interleave.py
+new file mode 100644
+index 000000000..76f293c8f
+--- /dev/null
++++ b/python/freetoken/scheduler/interleave.py
+@@ -0,0 +1,73 @@
++"""Decode-interleave scheduling policy.
++
++Background (measured on production, 2026-09-15)
++-----------------------------------------------
++``Scheduler._schedule_next_batch`` picks::
++
++    batch = (prefill_manager.schedule_next_batch(budget)
++             or decode_manager.schedule_next_batch())
++
++Prefill wins unconditionally.  A long prompt is chunked at the window pool's
++budget (384 tokens in production), so a 300k-token context is 797 consecutive
++prefill steps -- and while they run, *decoding requests already in flight are
++never scheduled*.  Measured on the live service:
++
++    four long cold prefills: 680/797/506/250 chunks, 267/317/190/93 s
++    prefill-burst share of a 15-minute window: 70%
++
++so an in-flight request waits up to ~5 minutes for its next token.  The
++scheduler already carries the marker for this::
++
++    # TODO: support other policies: e.g. DECODE first
++
++Reversing the order outright is wrong -- it starves prefill, and a request that
++never prefills never starts.  What is needed is *interleaving*: let prefill keep
++priority, but force a decode step every N prefill steps so in-flight requests
++make progress.  The cost is small by construction: measured chunk cost is
++0.388 s, and one decode step for a handful of requests is a fraction of that,
++so every 8th step costs ~1% of prefill wall time while bounding the stall at
++8 chunks (~3 s) instead of the whole burst (~300 s).
++
++This module holds the *policy* only -- a counter and a decision -- so it can be
++unit-tested without a Scheduler, an engine, or a GPU.
++"""
++
++from __future__ import annotations
++
++
++class DecodeInterleavePolicy:
++    """Decide whether to force a decode step between prefill steps.
++
++    ``every`` is the number of consecutive prefill steps allowed before a decode
++    step is forced.  ``None`` or <= 0 disables the policy, reproducing the
++    historical prefill-first behaviour bit-for-bit.
++
++    The counter only advances on prefill steps that were actually scheduled, so
++    a scheduler with nothing to prefill never accumulates credit, and the first
++    decode of a burst is not delayed.
++    """
++
++    def __init__(self, every: int | None = None) -> None:
++        self.every = int(every) if every else None
++        self._prefill_streak = 0
++
++    @property
++    def enabled(self) -> bool:
++        return self.every is not None and self.every > 0
++
++    def note_prefill(self) -> None:
++        """Record that a prefill step was scheduled in this slot."""
++        self._prefill_streak += 1
++
++    def note_decode(self) -> None:
++        """Record that a decode step was scheduled in this slot (streak resets)."""
++        self._prefill_streak = 0
++
++    def wants_decode(self) -> bool:
++        """True when the streak has reached the threshold and a decode is due."""
++        if not self.enabled:
++            return False
++        return self._prefill_streak >= self.every
++
++    def reset(self) -> None:
++        self._prefill_streak = 0
+diff --git a/python/freetoken/scheduler/scheduler.py b/python/freetoken/scheduler/scheduler.py
+index ac1bf322e..d605e66dc 100644
+--- a/python/freetoken/scheduler/scheduler.py
++++ b/python/freetoken/scheduler/scheduler.py
+@@ -31,6 +31,7 @@
+ from .cache import CacheManager
+ from .config import SchedulerConfig
+ from .decode import DecodeManager
++from .interleave import DecodeInterleavePolicy
+ from .io import SchedulerIOMixin
+ from .mm import cut_image_spans, plan_mm_batch
+ from .prefill import ChunkedReq, PrefillManager
+@@ -91,6 +92,14 @@ def __init__(self, config: SchedulerConfig):
+             ) or getattr(self.engine.kv_cache, "sliding_window_size", None),
+         )
+         self.decode_manager = DecodeManager(config.page_size)
++        # Bound how long a run of prefill steps may starve in-flight decodes. A long
++        # prompt chunked at the window budget is hundreds of consecutive prefill steps;
++        # measured on an 8xRTX4090 DSV4 deployment, that left an already-decoding
++        # request unscheduled for 267-317 s. Unset reproduces the historical
++        # prefill-first order exactly.
++        self._interleave = DecodeInterleavePolicy(
++            getattr(config, "decode_interleave_every", None)
++        )
+         self._bidirectional_mm = any(getattr(g, "bidirectional_mm_blocks", False) for g in config.model_config.attention_groups)
+         self.prefill_manager = PrefillManager(
+             self.cache_manager,
+@@ -867,11 +876,28 @@ def _gather_multimodal(self, batch: Batch) -> None:
+             )
+ 
+     def _schedule_next_batch(self) -> ForwardInput | None:
+-        # TODO: support other policies: e.g. DECODE first
+-        batch = (
+-            self.prefill_manager.schedule_next_batch(self.prefill_budget)
+-            or self.decode_manager.schedule_next_batch()
+-        )
++        # Prefill keeps priority -- a request that never prefills never starts -- but a
++        # long run of prefill chunks must not starve in-flight decodes. When the policy
++        # says a decode is due, take one if a decode is actually runnable; otherwise stay
++        # with prefill (never spend a slot idle just to keep a promise).
++        # getattr, not attribute access: the accounting tests drive this method on a
++        # partially built Scheduler, and interleaving must be an opt-in that a stripped
++        # object simply does not have rather than something that breaks it. A missing
++        # policy is the historical prefill-first order.
++        policy = getattr(self, "_interleave", None)
++        batch = None
++        if policy is not None and policy.wants_decode():
++            batch = self.decode_manager.schedule_next_batch()
++            if batch is not None:
++                policy.note_decode()
++        if batch is None:
++            batch = self.prefill_manager.schedule_next_batch(self.prefill_budget)
++            if batch is not None and policy is not None:
++                policy.note_prefill()
++        if batch is None:
++            batch = self.decode_manager.schedule_next_batch()
++            if batch is not None and policy is not None:
++                policy.note_decode()
+         if batch is None:
+             return None
+         forward_input = self._prepare_batch(batch)
+diff --git a/python/freetoken/server/args.py b/python/freetoken/server/args.py
+index ab2fb9b74..3166d66d7 100644
+--- a/python/freetoken/server/args.py
++++ b/python/freetoken/server/args.py
+@@ -407,6 +407,20 @@ def _infer_reasoning_parser(model_path: str) -> str | None:
+         ),
+     )
+ 
++    parser.add_argument(
++        "--decode-interleave-every",
++        type=int,
++        default=ServerArgs.decode_interleave_every,
++        help=(
++            "Force one decode step after this many consecutive prefill steps. A long "
++            "prompt is prefilled in chunks, so it occupies that many consecutive "
++            "scheduler steps; measured on an 8xRTX4090 DSV4 deployment, a 300k-token "
++            "context left an already-decoding request unscheduled for 267-317 s. "
++            "Unset keeps the historical prefill-first order (the scheduler's own TODO "
++            "names this policy)."
++        ),
++    )
++
+     parser.add_argument(
+         "--page-size",
+         type=int,
+diff --git a/tests/scheduler/test_interleave.py b/tests/scheduler/test_interleave.py
+new file mode 100644
+index 000000000..42a3f7221
+--- /dev/null
++++ b/tests/scheduler/test_interleave.py
+@@ -0,0 +1,346 @@
++"""Tests for DecodeInterleavePolicy and its wiring into Scheduler._schedule_next_batch.
++
++The production symptom this exists for (measured 2026-09-15): a 300k-token prompt
++is chunked at the window pool budget (384 tok), so it becomes 797 consecutive
++prefill steps, and an already-decoding request is not scheduled once during the
++267-317 s that takes.  Prefill must keep priority (a request that never prefills
++never starts) but must yield to decode periodically.
++"""
++
++from __future__ import annotations
++
++import pytest
++
++from freetoken.scheduler.interleave import DecodeInterleavePolicy
++
++
++# --------------------------------------------------------------------------- #
++# policy, in isolation
++# --------------------------------------------------------------------------- #
++def test_disabled_by_default_and_never_forces_decode():
++    """Unset reproduces historical prefill-first behaviour exactly."""
++    p = DecodeInterleavePolicy()
++    assert not p.enabled
++    for _ in range(10_000):
++        p.note_prefill()
++    assert not p.wants_decode()
++
++
++@pytest.mark.parametrize("every", [1, 2, 8, 16])
++def test_forces_decode_after_exactly_every_prefills(every):
++    p = DecodeInterleavePolicy(every)
++    assert p.enabled
++    for i in range(1, every):
++        p.note_prefill()
++        assert not p.wants_decode(), f"fired early at {i} < {every}"
++    p.note_prefill()
++    assert p.wants_decode(), f"did not fire at {every}"
++
++
++def test_decode_resets_the_streak():
++    p = DecodeInterleavePolicy(4)
++    for _ in range(4):
++        p.note_prefill()
++    assert p.wants_decode()
++    p.note_decode()
++    assert not p.wants_decode(), "streak must reset after a decode step"
++    for _ in range(3):
++        p.note_prefill()
++    assert not p.wants_decode()
++    p.note_prefill()
++    assert p.wants_decode()
++
++
++def test_every_one_interleaves_strictly():
++    """every=1 is the extreme: decode after every single prefill step."""
++    p = DecodeInterleavePolicy(1)
++    p.note_prefill()
++    assert p.wants_decode()
++
++
++@pytest.mark.parametrize("bad", [0, -1, -100])
++def test_non_positive_disables(bad):
++    p = DecodeInterleavePolicy(bad)
++    assert not p.enabled
++    for _ in range(50):
++        p.note_prefill()
++    assert not p.wants_decode()
++
++
++def test_reset_clears_credit():
++    p = DecodeInterleavePolicy(8)
++    for _ in range(7):
++        p.note_prefill()
++    p.reset()
++    assert not p.wants_decode()
++    p.note_prefill()
++    assert not p.wants_decode()
++
++
++# --------------------------------------------------------------------------- #
++# the decision the scheduler actually makes
++# --------------------------------------------------------------------------- #
++def _decide(policy, has_prefill, has_decode, every=8):
++    """Mirror of the scheduler's new decision, as a pure function.
++
++    prefill wins unless the policy says decode is due AND a decode is available.
++    """
++    if has_prefill and not (policy.wants_decode() and has_decode):
++        policy.note_prefill()
++        return "prefill"
++    if has_decode:
++        policy.note_decode()
++        return "decode"
++    if has_prefill:
++        policy.note_prefill()
++        return "prefill"
++    return None
++
++
++def test_burst_is_punctuated_by_decode_every_n():
++    """797 prefill steps in a row -- the production shape -- must contain decode steps."""
++    policy = DecodeInterleavePolicy(8)
++    seq = []
++    for _ in range(797):
++        seq.append(_decide(policy, has_prefill=True, has_decode=True))
++    n_dec = seq.count("decode")
++    # A decode step resets the streak, so a cycle is every+1 slots (8 prefill + 1 decode):
++    # 797 slots hold 88 full cycles, i.e. 88 decode steps.
++    assert n_dec == 797 // 9, f"expected {797 // 9} decode steps, got {n_dec}"
++    # and no run of prefills exceeds the threshold
++    run = 0
++    worst = 0
++    for s in seq:
++        run = run + 1 if s == "prefill" else 0
++        worst = max(worst, run)
++    assert worst == 8, f"longest prefill run {worst} exceeds the threshold"
++
++
++def test_disabled_policy_yields_the_historical_sequence():
++    policy = DecodeInterleavePolicy()
++    seq = [_decide(policy, True, True) for _ in range(100)]
++    assert seq.count("decode") == 0, "disabled must never take a decode slot"
++
++
++def test_decode_is_not_forced_when_none_is_runnable():
++    """Nothing to decode -> prefill keeps the slot (no idle step)."""
++    policy = DecodeInterleavePolicy(2)
++    seq = [_decide(policy, has_prefill=True, has_decode=False) for _ in range(10)]
++    assert seq == ["prefill"] * 10
++
++
++def test_prefill_keeps_priority_below_the_threshold():
++    """The first N-1 slots of a burst must still go to prefill."""
++    policy = DecodeInterleavePolicy(8)
++    seq = [_decide(policy, True, True) for _ in range(7)]
++    assert seq.count("decode") == 0
++
++
++def test_pure_decode_phase_unaffected():
++    """With nothing to prefill, every slot is decode (no policy interference)."""
++    policy = DecodeInterleavePolicy(8)
++    seq = [_decide(policy, has_prefill=False, has_decode=True) for _ in range(50)]
++    assert seq == ["decode"] * 50
++
++
++def test_scheduler_without_policy_keeps_prefill_first():
++    """A Scheduler built without __init__ (as the accounting tests do) must not break.
++
++    _schedule_next_batch reads the policy through getattr because the accounting tests
++    build a Scheduler this way; a stripped object keeps the historical prefill-first
++    order instead of raising.
++    """
++    from types import SimpleNamespace
++
++    from freetoken.scheduler.scheduler import Scheduler
++
++    prefill_batch = SimpleNamespace(is_prefill=True, prompt_admissions=[])
++    decode_batch = SimpleNamespace(is_prefill=False, prompt_admissions=[])
++    s = Scheduler.__new__(Scheduler)
++    s.prefill_budget = 384
++    s.prefill_manager = SimpleNamespace(schedule_next_batch=lambda budget: prefill_batch)
++    s.decode_manager = SimpleNamespace(schedule_next_batch=lambda: decode_batch)
++    s._prepare_batch = lambda value: value
++    s.send_result = lambda messages: None
++    # no _interleave attribute at all
++    assert not hasattr(s, "_interleave")
++    assert Scheduler._schedule_next_batch(s) is prefill_batch, "must stay prefill-first"
++
++
++def test_scheduler_with_policy_and_no_decode_stays_prefill():
++    """When no decode is runnable the policy must not steal a slot."""
++    from types import SimpleNamespace
++
++    from freetoken.scheduler.scheduler import Scheduler
++    from freetoken.scheduler.interleave import DecodeInterleavePolicy
++
++    prefill_batch = SimpleNamespace(is_prefill=True, prompt_admissions=[])
++    s = Scheduler.__new__(Scheduler)
++    s.prefill_budget = 384
++    s.prefill_manager = SimpleNamespace(schedule_next_batch=lambda budget: prefill_batch)
++    s.decode_manager = SimpleNamespace(schedule_next_batch=lambda: None)
++    s._prepare_batch = lambda value: value
++    s.send_result = lambda messages: None
++    s._interleave = DecodeInterleavePolicy(1)      # fires every step
++    for _ in range(5):
++        assert Scheduler._schedule_next_batch(s) is prefill_batch
++
++
++def test_scheduler_with_policy_takes_decode_when_due():
++    """Once the streak reaches the threshold, a runnable decode gets the slot."""
++    from types import SimpleNamespace
++
++    from freetoken.scheduler.scheduler import Scheduler
++    from freetoken.scheduler.interleave import DecodeInterleavePolicy
++
++    prefill_batch = SimpleNamespace(is_prefill=True, prompt_admissions=[])
++    decode_batch = SimpleNamespace(is_prefill=False, prompt_admissions=[])
++    s = Scheduler.__new__(Scheduler)
++    s.prefill_budget = 384
++    s.prefill_manager = SimpleNamespace(schedule_next_batch=lambda budget: prefill_batch)
++    s.decode_manager = SimpleNamespace(schedule_next_batch=lambda: decode_batch)
++    s._prepare_batch = lambda value: value
++    s.send_result = lambda messages: None
++    s._interleave = DecodeInterleavePolicy(3)
++    got = [Scheduler._schedule_next_batch(s) for _ in range(4)]
++    assert got[0] is prefill_batch and got[1] is prefill_batch and got[2] is prefill_batch
++    assert got[3] is decode_batch, "4th slot must be the forced decode"
++
++
++# --------------------------------------------------------------------------- #
++# Truth table against the REAL scheduler (codex review: _decide is a model of
++# the decision, not the decision -- it can drift from the code it describes).
++# --------------------------------------------------------------------------- #
++def _real_scheduler(every=None, prefill=True, decode=True):
++    """Build a Scheduler whose two managers are stubs with call counters."""
++    from types import SimpleNamespace
++
++    from freetoken.scheduler.scheduler import Scheduler
++    from freetoken.scheduler.interleave import DecodeInterleavePolicy
++
++    calls = {"prefill": 0, "decode": 0}
++    pf = SimpleNamespace(is_prefill=True, prompt_admissions=[])
++    dc = SimpleNamespace(is_prefill=False, prompt_admissions=[])
++
++    def _pf(budget):
++        calls["prefill"] += 1
++        return pf if prefill else None
++
++    def _dc():
++        calls["decode"] += 1
++        return dc if decode else None
++
++    s = Scheduler.__new__(Scheduler)
++    s.prefill_budget = 384
++    s.prefill_manager = SimpleNamespace(schedule_next_batch=_pf)
++    s.decode_manager = SimpleNamespace(schedule_next_batch=_dc)
++    s._prepare_batch = lambda value: value
++    s.send_result = lambda messages: None
++    if every is not None:
++        s._interleave = DecodeInterleavePolicy(every)
++    return s, calls, pf, dc
++
++
++@pytest.mark.parametrize("every,expected", [
++    # (policy N, expected sequence of slot winners over 9 slots)
++    (None, ["p"] * 9),                       # disabled -> always prefill
++    # streak starts at 0, so slot 0 is prefill; then strict alternation
++    (1, ["p", "d", "p", "d", "p", "d", "p", "d", "p"]),
++    (3, ["p", "p", "p", "d", "p", "p", "p", "d", "p"]),
++    (8, ["p"] * 8 + ["d"]),
++])
++def test_truth_table_against_real_scheduler(every, expected):
++    """The real _schedule_next_batch must produce exactly this slot sequence."""
++    from freetoken.scheduler.scheduler import Scheduler
++
++    s, calls, pf, dc = _real_scheduler(every=every)
++    got = []
++    for _ in range(9):
++        b = Scheduler._schedule_next_batch(s)
++        got.append("p" if b is pf else ("d" if b is dc else "?"))
++    assert got == expected, f"every={every}: got {got}, want {expected}"
++
++
++def test_every_one_alternates_while_both_stay_runnable():
++    """every=1 is the degenerate case: one decode between every prefill."""
++    from freetoken.scheduler.scheduler import Scheduler
++
++    s, calls, pf, dc = _real_scheduler(every=1)
++    seq = []
++    for _ in range(6):
++        b = Scheduler._schedule_next_batch(s)
++        seq.append("p" if b is pf else "d")
++    # slot 0 prefill (streak starts at 0), then alternation
++    assert seq == ["p", "d", "p", "d", "p", "d"]
++
++
++def test_latch_releases_when_decode_becomes_available():
++    """Due decode unavailable -> keep prefilling -> decode becomes available -> it fires.
++
++    Exercises the subtle path: the policy must not lose its 'decode is due' state
++    while waiting, and must not fire twice once it does.
++    """
++    from freetoken.scheduler.scheduler import Scheduler
++
++    s, calls, pf, dc = _real_scheduler(every=2)
++    # phase 1: no decode runnable at all
++    s.decode_manager.schedule_next_batch = lambda: None
++    for _ in range(5):
++        assert Scheduler._schedule_next_batch(s) is pf
++    # phase 2: decode becomes available -> next slot must be decode
++    s.decode_manager.schedule_next_batch = lambda: dc
++    assert Scheduler._schedule_next_batch(s) is dc, "latch did not release"
++
++
++def test_no_work_returns_none():
++    from freetoken.scheduler.scheduler import Scheduler
++
++    s, _, _, _ = _real_scheduler(every=8, prefill=False, decode=False)
++    assert Scheduler._schedule_next_batch(s) is None
++
++
++def test_pure_decode_fallback_when_nothing_to_prefill():
++    """With no prefill available every slot is decode (no policy interference)."""
++    from freetoken.scheduler.scheduler import Scheduler
++
++    s, calls, pf, dc = _real_scheduler(every=2, prefill=False, decode=True)
++    got = [Scheduler._schedule_next_batch(s) for _ in range(5)]
++    assert all(b is dc for b in got)
++
++
++def test_disabled_policy_object_not_just_missing_attribute():
++    """codex: cover a policy that EXISTS but is disabled, not only an absent one."""
++    from freetoken.scheduler.scheduler import Scheduler
++
++    s, calls, pf, dc = _real_scheduler(every=None)
++    s._interleave = __import__(
++        "freetoken.scheduler.interleave", fromlist=["DecodeInterleavePolicy"]
++    ).DecodeInterleavePolicy(0)          # present but disabled
++    got = [Scheduler._schedule_next_batch(s) for _ in range(6)]
++    assert all(b is pf for b in got), "a disabled policy must never take a slot"
++
++
++def test_decode_manager_not_probed_when_policy_disabled():
++    """When disabled, the decode manager must not be consulted at all (no extra call)."""
++    from freetoken.scheduler.scheduler import Scheduler
++
++    s, calls, pf, dc = _real_scheduler(every=None)
++    Scheduler._schedule_next_batch(s)
++    assert calls["decode"] == 0, "disabled policy should not probe decode"
++
++
++def test_config_to_scheduler_wiring():
++    """codex: cover CLI/config -> Scheduler.__init__ wiring."""
++    import inspect
++
++    from freetoken.engine.config import EngineConfig
++    from freetoken.scheduler import scheduler as sched_mod
++
++    assert "decode_interleave_every" in {f.name for f in __import__("dataclasses").fields(EngineConfig)}
++    src = inspect.getsource(sched_mod.Scheduler.__init__)
++    assert "_interleave" in src and "decode_interleave_every" in src, (
++        "Scheduler.__init__ must build the policy from the config field"
++    )
++    # and the CLI exposes it
++    from freetoken.server.args import ServerArgs
++    assert hasattr(ServerArgs, "decode_interleave_every")

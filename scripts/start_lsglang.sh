@@ -2,6 +2,7 @@
 # ==========================================
 # Qwen3.8-Flash-Next-NVFP4 @ single RTX 4090 48GB (SM89) via Lsglang
 # 单卡 4090 48GB 部署启动脚本（实测定稿参数，2026-09）
+# ⚠️ 历史路线（v1，Lsglang 1.4.13）。当前生产为 v4 = FreeToken，见 scripts/start_freetoken.sh
 # Usage: 修改下方配置变量后直接运行
 # ==========================================
 set -e

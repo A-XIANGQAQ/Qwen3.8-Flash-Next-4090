@@ -4,24 +4,50 @@
 
 已验证主机：
 
-- 单 RTX 4090 **48GB**，SM89（原版 24GB 未验证——权重 GPU 部分 ~17GB + KV 6GB + Mamba 6.5GB ≈ 30GB，超出 24GB）
-- CPU：建议 ≥32 物理核（decode 是 CPU 瓶颈，核越多越快）；LK_THREADS 建议 = 物理核数 − 2
-- RAM：**≥247GB**（模型 126GB resident + 运行时；`--disable-shared-experts-fusion` 下实测进程峰值 ~200GB）
-- 磁盘：模型 126GB + wheel/环境 ~30GB
+- 单 RTX 4090 **48GB**，SM89（原版 24GB 未验证——v4 栈实测显存占用 44–46GB，远超 24GB）
+- CPU：建议 ≥32 物理核（experts 在 CPU 上算，核越多越快）
+- RAM：**≥247GB**（模型 126GiB resident + 专家 host banks 63.3G；进程峰值 ~200GB）
+- 磁盘：模型 126GB + venv ~15GB
 - 不要启用 swap 作为容量替代
 
 ## 2. 软件前提 (Software Prerequisites)
 
 - Linux；NVIDIA driver 可运行 CUDA 13 runtime（实测 610.x）
-- conda/miniconda
+- **uv**（创建 venv 与装包；也可用 conda，但本项目的验证环境是 uv venv）
+- **nvcc 需在 PATH**（本机 `/usr/local/cuda/bin`）——Triton 要 JIT 编译内核，缺了起不来
 - ModelScope CLI（模型下载）
-- host 无需 SGLang/CUDA toolkit
+- host 无需预装 CUDA toolkit 的完整开发环境（venv 会拉入 `cuda-toolkit` pip 包）
 
 ## 3. 环境安装 (Environment Install)
 
-**路线选择**：v3（官方 v0.5.20 基线，推荐）= 自建 wheel；v1（1.4.13）= 直接装 release wheel。
+**当前路线（v4）= FreeToken**；历史路线（v3/v1，sglang）见 §3B。
 
-### 3A. v3：自建「官方 v0.5.20 + lk_moe + PLE 补丁」
+### 3A. v4：FreeToken + 三个本地补丁
+
+```bash
+uv venv ~/ft-venv --python 3.12
+uv pip install --python ~/ft-venv "freetoken[accel]"
+
+# 打三个本地补丁（幂等，可重复执行；升级 freetoken 后必须重跑）
+bash scripts/install_freetoken_patches.sh ~/ft-venv/lib/python3.12/site-packages
+
+# 验证
+~/ft-venv/bin/ft --help
+```
+
+`accel` extra 拉入 flashinfer-python[cu13] 0.6.18.post1 与 sglang-kernel 0.4.5。
+版本硬约束（由 freetoken 0.1.3 的元数据决定）：`torch>=2.11,<2.12`、`transformers>=5.16,<5.17`、`triton==3.6.0`。
+完整 102 包快照见 [`freeze-freetoken-0.1.3.txt`](freeze-freetoken-0.1.3.txt)。
+
+> 三个补丁**均未上游化**，且都打在 site-packages 里——`uv pip install -U` 会静默覆盖它们。
+> 启动脚本 `scripts/start_freetoken.sh` 内置自检，缺补丁会直接拒绝启动。
+
+### 3B. 历史路线（sglang，保留可复现）
+
+<details>
+<summary>展开 v3 / v1 的 sglang 安装步骤</summary>
+
+**v3（官方 v0.5.20 基线）= 自建 wheel：**
 
 ```bash
 conda create -n lsglang-next python=3.12 && conda activate lsglang-next
@@ -30,7 +56,6 @@ pip install build setuptools-rust setuptools-scm      # 构建期依赖
 
 bash scripts/build_upstream_flashnext.sh              # 取 v0.5.20 + 打 3 个补丁 + 构建
 
-# 运行时依赖（版本必须按此锁定）
 pip install --no-deps <构建产物>/lsglang-1.6.0+flashnext.v0520-py3-none-any.whl
 pip install "lk_moe==2.4.1" "sglang-kernel==0.4.7" "tilelang==0.1.11" "flashinfer-python[cu13]==0.6.18"
 pip install ./flash_attn-2.8.4+pr2751-cp312-cp312-linux_x86_64.whl   # SM89 必需
@@ -38,23 +63,17 @@ pip install ./flash_attn-2.8.4+pr2751-cp312-cp312-linux_x86_64.whl   # SM89 必�
 
 > `sglang-kernel==0.4.7` 是 v0.5.20 的启动强校验；`tilelang` 必须 0.1.11（见 TROUBLESHOOTING #15）。
 
-### 3B. v1：安装 release wheel
+**v1（Lsglang 1.4.13）= 直接装 release wheel：**
 
 ```bash
 bash scripts/install.sh
 ```
 
-脚本内容（或手动执行）：
-1. 下载两个 wheel（GitHub release `lsglang-v1.4.12` tag）：
-   - `lsglang-1.4.13-py3-none-any.whl`（SHA256 `2ccc92f9...`）
-   - `flash_attn-2.8.4+pr2751-cp312-cp312-linux_x86_64.whl`（440MB，**SM89 必需**——head_dim=256 的 128×64 tile 超 4090 shared memory，PR2751 改 128×32）
-2. `conda create -n lsglang python=3.12`
-3. 安装顺序（关键）：
-   ```bash
-   pip install torch==2.13.0 torchvision --index-url https://download.pytorch.org/whl/cu130
-   pip install ./flash_attn-2.8.4+pr2751-cp312-cp312-linux_x86_64.whl   # 先装，让依赖解析看到
-   pip install ./lsglang-1.4.13-py3-none-any.whl
-   ```
+脚本下载两个 wheel（GitHub release `lsglang-v1.4.12` tag）、建 conda env、按序安装
+（torch → flash_attn → lsglang）。`flash_attn-2.8.4+pr2751` 是 **SM89 必需**——
+head_dim=256 的 128×64 tile 超 4090 shared memory，PR2751 改 128×32。
+
+</details>
 
 ## 4. 模型下载 (Model Download)
 
@@ -89,39 +108,41 @@ curl -L -o chat_template.jinja \
 
 ## 6. 启动 (Start)
 
-编辑对应启动脚本（模型路径、`SGLANG_BIN`、对外名、端口）后：
+编辑启动脚本顶部的配置区（模型路径、`FT_BIN`、`SITE_PACKAGES`）后：
 
 ```bash
-# v3（官方 v0.5.20 基线，推荐；内置 sudo 提权 + memlock + cd + 就绪等待）
-bash scripts/start_lsglang_upstream.sh
+# v4（当前，FreeToken；内置 sudo 提权 + memlock + 补丁自检 + 就绪等待）
+bash scripts/start_freetoken.sh
 
-# v1（1.4.13）
-bash scripts/start_lsglang.sh
-tail -f /tmp/lsglang.log   # 等 "The server is fired up and ready to roll!"
+# v3（历史，sglang）
+bash scripts/start_lsglang_upstream.sh
 ```
 
-首次启动约 5 分钟（126GB 加载 + KV/Mamba cache + CUDA graph 捕获）。验证：
+首次启动约 **40 秒**（206 shards 权重 + 专家 banks；sglang 路线约 5 分钟）。
+**就绪判据是日志行 `ready to serve`**——不要用 `/health`，它在加载完成前就返回 200（上游 #537）。
 
 ```bash
-curl -s localhost:8000/health                        # 200
+tail -f /tmp/ft.log                                   # 等 "ready to serve"
 curl -s localhost:8000/v1/models                      # 模型名 + max_model_len=262144
 curl -s localhost:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"<served_name>","messages":[{"role":"user","content":"你好"}],"max_tokens":64,"stream":false,"chat_template_kwargs":{"enable_thinking":false}}'
+  -d '{"model":"<served_name>","messages":[{"role":"user","content":"你好"}],"max_tokens":64,"stream":false}'
 ```
 
 ## 7. 成功定义 (Definition of Success)
 
 - [ ] 206 shards 校验通过
-- [ ] `/health` 200，engine ready
+- [ ] 日志出现 `ready to serve`，进程存活
 - [ ] `/v1/models` 返回预期模型名
 - [ ] 中文请求可读、无乱码
 - [ ] RAM 有余量、swap 为 0、无 Xid/OOM
-- [ ] （可选）8k 无缓存 prefill 客户端计时 ~7s（见 BASELINE）
+- [ ] GPUs 显存 44–46GB（未跑满 48GB）
+- [ ] （可选）8K 无缓存 prefill 客户端计时——⚠️ 该项方差极大，见 [BASELINE](BASELINE.md)
 
 ## 不在默认范围 (Out of Scope)
 
-- 单卡 24GB 原版 4090；FP8/BF16 权重（fp8 在 Lsglang 有已知问题）
-- MTP（可启动但 CPU 瓶颈无收益，见 TROUBLESHOOTING）
+- 单卡 24GB 原版 4090
+- FP8/BF16 权重（fp8 在 sglang 路线上有已知问题）
+- MTP（sglang 路线下可启动但 CPU 瓶颈无收益；FreeToken 侧上游对 qwen4_exp 的 MTP 直接丢弃）
 - 262144 以上（1M YaRN）
 - 公网服务（建议 loopback + 反向代理）

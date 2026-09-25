@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 """单次客户端口径测量：prefill(8k 无缓存唯一文本) 或 decode(512)。
 用法: python3 bench_once.py prefill|decode [次数]
+环境变量:
+  MODEL_DIR    模型目录（取 tokenizer）  默认 /path/to/RadixArk--Qwen3.8-Flash-Next-NVFP4
+  SERVED_NAME  服务端模型名              默认 Qwen3.8-Flash-Next
+  API_URL      OpenAI 兼容 endpoint      默认 http://127.0.0.1:8000/v1/chat/completions
 输出: jsonl，每行 {type, prompt_tokens, completion_tokens, total_s, tps}
 """
-import json, random, sys, time, urllib.request
+import json, os, random, sys, time, urllib.request
 from transformers import AutoTokenizer
 
-tok = AutoTokenizer.from_pretrained("/home/gfyd-ai/LLM_MODEL/RadixArk--Qwen3.8-Flash-Next-NVFP4", trust_remote_code=True)
+MODEL_DIR = os.environ.get("MODEL_DIR", "/path/to/RadixArk--Qwen3.8-Flash-Next-NVFP4")
+SERVED_NAME = os.environ.get("SERVED_NAME", "Qwen3.8-Flash-Next")
+API_URL = os.environ.get("API_URL", "http://127.0.0.1:8000/v1/chat/completions")
+
+tok = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
 SEGS = ["量子计算纠错码与表面码阈值分析综述","多模态大模型视觉-语言对齐机制研究","分布式训练梯度压缩的收敛性保障",
         "长上下文检索增强生成的稀疏化策略","混合专家模型的负载均衡与路由学习","神经网络量化误差传播的统计分析",
         "扩散模型采样加速的确定性方法","图神经网络在分子性质预测中的应用","强化学习奖励塑形的安全性讨论",
@@ -21,7 +29,7 @@ def make_unique_prompt(n_tokens=8000):
     return text
 
 def send(payload):
-    req = urllib.request.Request("http://127.0.0.1:8000/v1/chat/completions",
+    req = urllib.request.Request(API_URL,
         data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
     t0 = time.time()
     with urllib.request.urlopen(req, timeout=600) as r:
@@ -34,10 +42,10 @@ def main():
     for i in range(n):
         if kind == "prefill":
             prompt = make_unique_prompt(8000)
-            payload = {"model": "Qwen3.8-27B", "messages": [{"role": "user", "content": prompt}],
+            payload = {"model": SERVED_NAME, "messages": [{"role": "user", "content": prompt}],
                        "max_tokens": 32, "stream": False, "chat_template_kwargs": {"enable_thinking": False}}
         else:
-            payload = {"model": "Qwen3.8-27B", "messages": [{"role": "user", "content": "写一篇关于人工智能发展的长文"}],
+            payload = {"model": SERVED_NAME, "messages": [{"role": "user", "content": "写一篇关于人工智能发展的长文"}],
                        "max_tokens": 512, "stream": False, "chat_template_kwargs": {"enable_thinking": False}}
         body, dt = send(payload)
         if "error" in body:

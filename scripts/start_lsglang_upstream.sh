@@ -1,7 +1,8 @@
 #!/bin/bash
 # ==========================================
 # Qwen3.8-Flash-Next-NVFP4 @ single RTX 4090 48GB (SM89)
-# v3 启动脚本：官方 sglang v0.5.20 + lk_moe + PLE CPU 补丁（见 docs/UPGRADE_UPSTREAM_FLASHNEXT.md）
+# v3 启动脚本：官方 sglang v0.5.20 + lk_moe + PLE CPU 补丁（见 docs/UPGRADE.md §5）
+# ⚠️ 历史路线。当前生产为 v4 = FreeToken，见 scripts/start_freetoken.sh（本脚本保留可复现/可回滚）
 # 与 v1/v2 脚本的差异：
 #   - --ple-offload-embedding 显式开启（自动解析可能因 dtype 判定不启用）
 #   - 需要 root 放开 memlock（PLE pinned 表 47.7GiB）→ 脚本自动 sudo 提权
