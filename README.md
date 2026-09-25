@@ -90,9 +90,9 @@ bash scripts/start_freetoken.sh
 # 等日志出现 "ready to serve"（约 40 秒；注意不能用 /health 判断——见 TROUBLESHOOTING）
 ```
 
-**端口**：`8000` = API，`8001` = nginx（既有反代不动）。FreeToken 内部的 rendezvous 端口
-**自动挑空闲的**（从 API 端口+1 起找）——反向代理占着相邻端口、同机跑第二个实例、
-上个进程没退干净，都不会再挡启动。需要固定时显式设 `FT_DIST_PORT` 即可。
+**端口**：只需要指定 API 端口（`--port`）。FreeToken 内部的 rendezvous 端口会**自动挑空闲的**
+（从 API 端口+1 起向上找）——它是实现细节，不该成为部署约束：相邻端口被任何进程占用都不会挡启动。
+需要固定时显式设 `FT_DIST_PORT`。
 
 详细步骤见 [docs/REPRODUCTION.md](docs/REPRODUCTION.md)。
 
