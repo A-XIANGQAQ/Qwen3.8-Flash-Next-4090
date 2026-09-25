@@ -1,0 +1,115 @@
+# 补丁 04：自动避开被占用的 rendezvous 端口
+#
+# 目标：freetoken==0.1.3 源码（装在 <venv>/lib/python3.12/site-packages 下）
+#
+# 问题（通用）：FreeToken 内部 torch.distributed rendezvous 的地址默认取「API 端口 + 1」，
+#   一旦该端口被占用就直接启动失败。实际部署里这很常见：反向代理/Nginx 正好在下一个端口、
+#   同机起了第二个实例、上一个进程没退干净——都不该让服务起不来。
+#
+# 本补丁的做法：
+#   1. server/args.py 新增 find_free_dist_port()：从 preferred 起向上找第一个能 bind 的端口，
+#      整段都占用则退回内核分配的临时端口；
+#   2. launch_server() 在【父进程】里解析一次，并写入 FT_DIST_PORT 环境变量。
+#      这一步必须在父进程做——rendezvous 地址要求各 rank 完全一致，而 worker 侧的
+#      distributed_addr 是个 property，若各自求值就会各挑各的、握手失败。
+#      worker 由 multiprocessing spawn 产生，继承父进程环境，因此读到同一个端口。
+#   3. 显式设置 FT_DIST_PORT 仍然生效（作为起始偏好），被占用时打 WARNING 并顺延。
+#
+# 打法：cd <venv>/lib/python3.12/site-packages && patch -p1 < patches/04_ft_auto_dist_port.patch
+# 上游：无对应 issue（本补丁把原先「只解决本站 8001 冲突」的专用改法泛化为通用能力）
+diff --git a/freetoken/server/args.py b/freetoken/server/args.py
+--- a/freetoken/server/args.py
++++ b/freetoken/server/args.py
+@@ -101,7 +101,38 @@
+ 
+     @property
+     def distributed_addr(self) -> str:
+-        return f"tcp://127.0.0.1:{self.server_port + 1}"
++        # [local patch] FT_DIST_PORT lets the torch.distributed rendezvous port differ from
++        # server_port + 1 (e.g. the API serves on 8000 while a reverse proxy keeps 8001).
++        # launch_server() resolves a free port in the parent process and exports it before
++        # spawning, so every rank reads the same value -- see find_free_dist_port().
++        port = int(os.getenv("FT_DIST_PORT", self.server_port + 1))
++        return f"tcp://127.0.0.1:{port}"
++
++
++def find_free_dist_port(preferred: int, tries: int = 100) -> int:
++    """Return the first bindable port at or after `preferred`.
++
++    [local patch] FreeToken's rendezvous defaults to `server_port + 1`. That port is often
++    already taken -- a reverse proxy on the next port, a second instance, a leftover process --
++    and the launch used to fail outright. Scan upward for a free port instead, falling back to
++    an ephemeral one if the whole range is busy.
++
++    Call this ONCE, in the parent process: the address must be identical across ranks, and the
++    worker-side `distributed_addr` property would otherwise re-evaluate per process.
++    """
++    import socket
++
++    for port in range(preferred, preferred + tries):
++        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
++            try:
++                sock.bind(("127.0.0.1", port))
++            except OSError:
++                continue
++            return port
++
++    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
++        sock.bind(("127.0.0.1", 0))
++        return int(sock.getsockname()[1])
+ 
+ 
+ def _json_object(text: str) -> dict:
+diff --git a/freetoken/engine/config.py b/freetoken/engine/config.py
+--- a/freetoken/engine/config.py
++++ b/freetoken/engine/config.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ import copy
++import os
+ from dataclasses import dataclass, field, replace
+ from functools import cached_property
+ from typing import TYPE_CHECKING, List
+@@ -150,4 +151,6 @@
+ 
+     @property
+     def distributed_addr(self) -> str:
+-        return "tcp://127.0.0.1:2333"
++        # [local patch] FT_DIST_PORT override; launch_server() resolves a free port and exports
++        # it before spawning -- see find_free_dist_port() in freetoken/server/args.py
++        return f"tcp://127.0.0.1:{os.getenv('FT_DIST_PORT', 2333)}"
+diff --git a/freetoken/server/launch.py b/freetoken/server/launch.py
+--- a/freetoken/server/launch.py
++++ b/freetoken/server/launch.py
+@@ -128,7 +128,7 @@
+     prog: str | None = None,
+ ) -> None:
+     from .api_server import run_api_server
+-    from .args import parse_args
++    from .args import find_free_dist_port, parse_args
+ 
+     server_args, run_shell = parse_args(
+         sys.argv[1:] if argv is None else argv,
+@@ -137,6 +137,21 @@
+     )
+     logger = init_logger(__name__, "initializer")
+ 
++    # [local patch] Resolve the rendezvous port ONCE, here in the parent, and export it so every
++    # spawned rank derives the same address (the worker-side `distributed_addr` property reads
++    # the environment; re-evaluating it per process would let ranks disagree). Previously
++    # `server_port + 1` was used blindly, so a busy port -- a reverse proxy on the next port, a
++    # second instance, a leftover process -- failed the launch outright.
++    explicit_port = os.environ.get("FT_DIST_PORT")
++    preferred_port = int(explicit_port) if explicit_port else server_args.server_port + 1
++    resolved_port = find_free_dist_port(preferred_port)
++    if resolved_port != preferred_port:
++        logger.warning(
++            f"rendezvous port {preferred_port} is in use; using {resolved_port} instead"
++            + (" (FT_DIST_PORT was set explicitly)" if explicit_port else "")
++        )
++    os.environ["FT_DIST_PORT"] = str(resolved_port)
++
+     if server_args.gpu:
+         # resolve here so a typo is one clear error before any worker spawns
+         from freetoken.gpu_select import resolve_gpu_uuids

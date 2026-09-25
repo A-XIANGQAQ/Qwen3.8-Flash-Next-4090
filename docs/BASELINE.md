@@ -10,7 +10,7 @@
 ## 测试身份 (Test Identity)
 
 - 模型：RadixArk/Qwen3.8-Flash-Next-NVFP4（ModelScope master，126GB/206 shards）
-- 引擎（当前 v4）：**FreeToken 0.1.3** + 三个本地补丁（FT_DIST_PORT / qwen3.8 workload / decode-interleave）；
+- 引擎（当前 v4）：**FreeToken 0.1.3** + 三个本地补丁（rendezvous 自动避让 / qwen3.8 workload / decode-interleave）；
   依赖锁定见 [freeze-freetoken-0.1.3.txt](freeze-freetoken-0.1.3.txt)
 - 主机：单 RTX 4090 48GB（SM89）+ 38 核 CPU + 247GB RAM
 - 配置（v4 定稿）：`--max-running-requests 4`、`--num-tokens 265216`、`--moe-cache-rate 0.40`、

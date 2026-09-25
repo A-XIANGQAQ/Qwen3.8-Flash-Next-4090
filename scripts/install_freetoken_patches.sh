@@ -40,8 +40,8 @@ run_patch() {   # $1=补丁文件  $2=标记文件  $3=标记串  $4=patch 层�
     applied=$((applied + 1))
 }
 
-run_patch "$PATCHES_DIR/04_ft_dist_port.patch" \
-          "freetoken/server/args.py"    "FT_DIST_PORT"       1
+run_patch "$PATCHES_DIR/04_ft_auto_dist_port.patch" \
+          "freetoken/server/args.py"    "find_free_dist_port" 1
 run_patch "$PATCHES_DIR/05_ft_workload_qwen38.patch" \
           "freetoken/moe/benchbw.py"    "qwen3.8-flash-next" 1
 

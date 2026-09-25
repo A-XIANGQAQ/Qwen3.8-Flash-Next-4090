@@ -28,7 +28,7 @@
 | 层 | 固定身份 |
 |---|---|
 | 模型 | `RadixArk/Qwen3.8-Flash-Next-NVFP4`（ModelScope **master**，126GiB / 206 shards） |
-| 引擎 | **FreeToken `0.1.3`** + [FT_DIST_PORT 补丁](patches/04_ft_dist_port.patch) + [qwen3.8 workload 补丁](patches/05_ft_workload_qwen38.patch) + [decode-interleave 补丁](patches/06_ft_decode_interleave.patch)（**三个补丁均未上游化**） |
+| 引擎 | **FreeToken `0.1.3`** + [rendezvous 自动避让补丁](patches/04_ft_auto_dist_port.patch) + [qwen3.8 workload 补丁](patches/05_ft_workload_qwen38.patch) + [decode-interleave 补丁](patches/06_ft_decode_interleave.patch)（**三个补丁均未上游化**） |
 | 关键依赖 | `freetoken[accel]` 拉入：torch 2.11.0（约束 `>=2.11,<2.12`）、transformers 5.16.1（`>=5.16,<5.17`）、triton 3.6.0、flashinfer-python 0.6.18.post1、sglang-kernel 0.4.5（`accel` extra） |
 | Chat Template | [froggeric v22.5](https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates)（官方兼容 Flash-Next，原生 effort 别名） |
 | 环境 | python 3.12 / uv venv / CUDA 13 runtime（driver ≥ 580；**nvcc 需在 PATH**，Triton 要 JIT） |
@@ -153,8 +153,9 @@ bash scripts/start_freetoken.sh
 # 等日志出现 "ready to serve"（约 40 秒；注意不能用 /health 判断——见 TROUBLESHOOTING）
 ```
 
-**三端口分工**：`8000` = API，`8001` = nginx（既有反代不动），`8002` = FreeToken 内部 rendezvous
-（默认取 API 端口+1 会撞 8001，`FT_DIST_PORT` 补丁解耦）。
+**端口**：`8000` = API，`8001` = nginx（既有反代不动）。FreeToken 内部的 rendezvous 端口
+**自动挑空闲的**（从 API 端口+1 起找）——反向代理占着相邻端口、同机跑第二个实例、
+上个进程没退干净，都不会再挡启动。需要固定时显式设 `FT_DIST_PORT` 即可。
 
 详细步骤见 [docs/REPRODUCTION.md](docs/REPRODUCTION.md)。
 
