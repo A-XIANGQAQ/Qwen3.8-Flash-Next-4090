@@ -326,6 +326,36 @@ ps -eo pid,args | grep '[s]erve/server.py'     # serve 层（方括号写法避�
 - 配置里补上 `vision` 段后，serve 层会自己加 `--vision --vram-reserve-mib 700`，不必改 `args`
 - **必须重启**才生效（编码器在引擎之前预热，引擎据此规划显存）
 
+## 🔵 38. `400 the image could not be read: the vision encoder stopped`（装了图却崩）
+
+**与 #37 不同**：#37 是根本没装，本条的编码器**装好了、能启动、还预热成功**，一遇上真请求就崩，然后被反复重启。
+
+引擎日志里的真凶：
+
+```
+strata-vision: model files loaded in 0.8 s
+strata-vision: warmed up at 1024 image tokens in 0.3 s
+CUDA error: out of memory
+  in function alloc at .../ggml-cuda.cu:588    cuMemCreate(&handle, reserve_size, &prop, 0)
+```
+
+**根因：显存预算不足，不是编码器坏了。** serve 层在「配置有 `vision` 段但 `args` 里没有 `--vision`」时
+会自动补 `--vram-reserve-mib 700`——那是给小卡设计的默认值。48GB 卡本身已占满时，引擎会把显存吃到
+**只剩 329 MiB**；编码器一旦重启就需要 ~1.5 GB ⇒ OOM ⇒ serve 层再重启它 ⇒ 死循环。
+
+**两个判据行（引擎日志）**：
+
+| 行 | 含义 |
+|---|---|
+| `strata serve: N MiB of VRAM free with everything loaded` | **N 必须 ≥ ~1600**；本站默认时只有 329 |
+| `strata verify: no VRAM for a new window graph ... (a larger --vram-reserve-mib keeps more)` | 出现即说明整卡已被压死，引擎自己的 CUDA graph 都保不住 |
+
+**编码器的需求与图大小无关**：实测 360×240 小图与 1398×1167 真截图**峰值都是 1,481 MiB**
+（预热即按 `max_tokens` 顶格分配）⇒ 留够 ~1.5 GB 是硬要求。
+
+**修法**：把 `--vision --vram-reserve-mib 2560` **显式写进配置的 `args`**（写了就不会被自动补 700），重启。
+本站代价：GPU 专家缓存 34.09 → **32.28 GiB**，但文本速度在噪声内没变（TTFT 0.19 s、纯解码 124 t/s）。
+
 ---
 
 ## 立即停止条件 (Stop conditions)

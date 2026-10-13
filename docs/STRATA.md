@@ -169,16 +169,34 @@ v4 的破限来自 **checkpoint 本身**（abliterated 权重）。v5 用的模�
 > 💡 **配置里有 `vision` 段、但 `args` 里没有 `--vision` 时，serve 层会自己补上**
 > `--vision --vram-reserve-mib 700` 并打一行提示 ⇒ 手写配置段即可生效，不必再跑 setup。
 
-**代价（本站实测 2026-10-13）**：
+**代价（本站实测 2026-10-13，三轮）**：
 
-| 项 | 装前 | 装后 |
-|---|---:|---:|
-| 显存 | 48,454 / 49,140 MiB | 48,335 / 49,140 MiB（引擎日志：`329 MiB of VRAM free with everything loaded`） |
-| GPU 专家缓存 | 35.54 GiB | **34.09 GiB**（vision 占掉 ~1.45 GB） |
-| 单流 TTFT | 0.20 s | **0.19 s** |
-| 单流纯解码 | 118 t/s | **121 t/s** |
+| 项 | 装前（无 vision） | 默认 reserve 700 | **reserve 2560（定稿）** |
+|---|---:|---:|---:|
+| 显存 | 48,454 / 49,140 MiB | 48,335 MiB | **46,483 MiB** |
+| 引擎自述空闲 | — | **329 MiB** ⛔ 不够 | **2,181 MiB** ✅ |
+| GPU 专家缓存 | 35.54 GiB | 34.09 GiB | **32.28 GiB**（11054 专家） |
+| 单流 TTFT | 0.20 s | 0.19 s | **0.19 s** |
+| 单流纯解码 | 118 t/s | 121 t/s | **124 t/s**（6 次，117–128） |
 
-⇒ **文本速度在噪声内没变**，尽管专家缓存确实少了 1.45 GB。上游预期的「text a few % slower」本站没测出来。
+⇒ **文本速度在噪声内没变**，尽管 GPU 专家缓存少了 3.26 GiB（resident RAM 模式仍持 37.64 GiB，
+少掉的那点由文件层兜住）。上游预期的「text a few % slower」本站没测出来。
+
+> ⛔ **`--vram-reserve-mib` 不能留默认 700——这是必踩的坑。**
+> serve 层在「配置有 `vision` 段、但 `args` 里没有 `--vision`」时会**自动补 `--vram-reserve-mib 700`**，
+> 那是给小卡设计的默认值。48GB 卡本身已占满时，引擎会把显存吃到**只剩 329 MiB**；而编码器一旦重启
+> （图片请求失败一次它就重启一次）就需要 ~1.5 GB，于是
+> `cuMemCreate(...) CUDA error: out of memory`
+> → `400 the image could not be read: the vision encoder stopped` → 再重启 → 死循环。
+>
+> **两个判据行，都在引擎日志里**：
+> - `strata serve: N MiB of VRAM free with everything loaded` —— N 必须 ≥ ~1600
+> - `strata verify: no VRAM for a new window graph ... (a larger --vram-reserve-mib keeps more)` —— 出现即说明卡已被压死
+>
+> **编码器的显存需求与图大小无关**：实测 360×240 的小图与 1398×1167 的真截图**峰值完全相同 = 1,481 MiB**
+> ——它在预热时就按 `max_tokens` 顶格分配。所以留够 ~1.5 GB 是硬要求，不是"大图才需要"。
+>
+> **修法**：把 `--vision --vram-reserve-mib 2560` **显式写进配置的 `args`**——写了就不会再被自动补 700。
 
 ⚠️ **不要为了开图像重跑 `setup.sh`**：`carry_over()` 明确写着「手加到 `args` 的引擎选项不合并（setup chooses
 those）」——重跑会抹掉 `--kv-resident 32768` / `--batch-mtp` / `--conversation-cache-mib 8192` 这些手调项。
