@@ -1,20 +1,47 @@
 # 运维手册 (Operations)
 
+> **两代引擎互斥**：v5（Strata）与 v4（FreeToken）各占本卡 90%+ 显存，**任何时刻只能活一个**。
+> 切换是停机切换（约 1–2 分钟）。详细路线见 [STRATA.md](STRATA.md)。
+
 ## 1. 启动 (Start)
 
 ```bash
-# v4（当前，FreeToken）：自动 sudo 提权 + ulimit -l unlimited + 补丁自检 + 就绪等待 + 可选关 GUI
-bash scripts/start_freetoken.sh
+# ── v5（当前，Strata）──────────────────────────────
+setsid bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
+# 就绪标志：日志行 "ready:"（约 50 秒）
+#   ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions, Anthropic: /v1/messages, context 262144 tokens)
 
-# v3（历史，sglang）：bash scripts/start_lsglang_upstream.sh
+# ⚠️ 不要用 ./setup.sh 起服务 —— 它无参数时会自己拉起模型并【绕过 chat 模板守卫】，模板会退回原装
+# ⚠️ 必须先确认显存已空（见 §3），否则 cudaMalloc OOM
+
+# ── v4（回滚，FreeToken）────────────────────────────
+bash scripts/start_freetoken.sh        # 自动 sudo 提权 + ulimit -l unlimited + 补丁自检 + 就绪等待
 tail -f /tmp/ft.log
 ```
 
-- 就绪标志：日志行 `ready to serve`（约 **40 秒**）
+- v4 就绪标志：日志行 `ready to serve`（约 **40 秒**）
 - ⚠️ **不要用 `/health` 判断就绪**——FreeToken 的 `/health` 在模型加载完成前就返回 200（上游 #537）。
   加载期间打 `/v1/chat/completions` 会被拒。
-- ⚠️ 脚本必须在**普通用户**的 shell 里运行（会自己 sudo 提权）。root 外壳的 cwd 会让 spawn 出的 worker 崩溃（见 TROUBLESHOOTING）
-- 启动前脚本会自检三个本地补丁是否在位——缺任何一个直接退出并打印重打命令
+- ⚠️ v4 脚本必须在**普通用户**的 shell 里运行（会自己 sudo 提权）。root 外壳的 cwd 会让 spawn 出的 worker 崩溃（见 TROUBLESHOOTING）
+- 启动前 v4 脚本会自检三个本地补丁是否在位——缺任何一个直接退出并打印重打命令
+
+## 1b. 引擎互切 (Switch / Rollback)
+
+```bash
+S=/home/user/local-tools/switch_engine.sh
+
+bash $S B --status          # 只看当前是谁（A=v4 FreeToken, B=v5 Strata）
+bash $S B                   # 切到 v5
+bash $S A                   # 切回 v4（回滚）
+
+# 或直接手工
+bash local-tools/start_freetoken_noroot.sh   # 回滚 v4
+bash strata/stop_strata.sh                                  # 停 v5（含显存释放判据）
+```
+
+`switch_engine.sh` 的流程：停当前 → **轮询等 `nvidia-smi` used <1000 MiB** → 起目标 →
+按引擎区分的就绪判据 → **走服务入口跑真实推理探针** → 失败则自动回滚。
+⚠️ 其**真实切换 + 回滚路径尚未实测**（2026-10-13 的切换是手工做的）。
 
 ## 2. 观察 (Observe)
 
@@ -32,14 +59,23 @@ tail -f /tmp/ft.log                 # 关注: Traceback / OOM / Xid / swap 增�
 ## 3. 停止 / 重启 (Stop / Restart)
 
 ```bash
-# 停
+# ── v5（Strata）──────────────────────────────
+bash strata/stop_strata.sh      # 停服务端 + 引擎，并【等显存降到 <1000 MiB】才算成功
+
+# ── v4（FreeToken）───────────────────────────
 pkill -f "ft-venv/bin/ft serve"
-# 重启（约 40 秒）
-bash scripts/start_freetoken.sh
+bash scripts/start_freetoken.sh        # 重启（约 40 秒）
 ```
 
+> ⛔ **停完必须等显存真正释放再起下一个引擎。** 实测：`ft_stop.sh` 打印"干净停止"时
+> `nvidia-smi` 仍显示 **47,712 MiB 被占**，立刻起 Strata 会 `cudaMalloc ... out of memory`。
+> **判据是 `nvidia-smi --query-gpu=memory.used --format=csv,noheader` 降到 <1000 MiB，不是进程消失。**
+> （2026-10-13 漏这步 → nginx 502 五分钟。）
+> 一条命令自查：`nvidia-smi --query-gpu=memory.used --format=csv,noheader`
+
 ⚠️ 不要用 `pgrep -f` 取 PID 后再 kill——该模式可能匹配到命令行含此字符串的 shell 自身。
-改用 `ps aux | grep '[f]t-venv/bin/ft serve'` 确认。
+改用 `ps aux | grep '[f]t-venv/bin/ft serve'` 确认；Strata 的引擎二进制名就是 `strata`，
+可以安全用 `pgrep -x strata`（精确匹配，不会自匹配）。
 
 ⚠️ **改参数一律走「停 + 重启」**：40 秒就能起回来，而 `ft ctl cache rebuild` 热调在上游有把服务器
 wedge 住的记录（#526，重建 OOM 后无法回滚）。

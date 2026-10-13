@@ -1,10 +1,11 @@
 # 升级记录 (Upgrade Log)
 
-本页记录本项目的引擎演进。当前为 **v4（FreeToken）**，v1–v3（Lsglang / 官方 sglang）全部折叠保留作参考。
+本页记录本项目的引擎演进。当前为 **v5（Strata）**，v1–v4（FreeToken / 官方 sglang / Lsglang）全部折叠保留作参考。
 
 | 版本 | 时间 | 路线 | 状态 |
 |---|---|---|---|
-| v4（当前）| **2026-09-24** | **FreeToken 0.1.3** + 三个本地补丁 | ✅ 已上线 |
+| **v5（当前）** | **2026-10-13** | **Strata 0.1.43.1** + 自带 ESP 破限（**无本地补丁**） | ✅ 已上线（见 §0） |
+| v4 | 2026-09-24 | **FreeToken 0.1.3** + 三个本地补丁 + abliterated NVFP4 | 回滚目标（见 §1，命令见 §8） |
 | v3 | 2026-09-23 | 官方 sglang tag **v0.5.20** + lk_moe 补丁重放 + PLE 补丁 | 历史（见 §5） |
 | v2 | 2026-09-14 | Lsglang `0.5.19-lkmoe` 分支合并 PR #37500 + PLE 补丁 | 历史（见 §6） |
 | v1 | 原始 | Lsglang 1.4.13 + lk_moe 2.4.0 | 历史（见 §6） |
@@ -14,7 +15,83 @@
 
 ---
 
-## 1. 为什么切到 FreeToken
+## 0. v5：切到 Strata（2026-10-13）
+
+> 完整路线说明见 **[STRATA.md](STRATA.md)**；本节只记「为什么切、怎么切、踩了什么坑」。
+
+### 0.1 为什么切
+
+同一个模型、同一 prompt、同一服务入口，**单流 decode 2.0×、TTFT 14×**：
+
+| 指标 | v4 | **v5** |
+|---|---:|---:|
+| 单流 decode | 59.1 t/s | **118 t/s** |
+| 单流 TTFT | 2.73 s | **0.20 s** |
+| 4 路端到端（512 token） | 17.1 s | **14.7 s** |
+| 并发扩展比（1→4） | **2.55×** | 1.16× |
+
+**取舍**：v5 单流全面占优，但**高并发扩展性弱**（每路 36.9 vs 45.8 t/s）。1–2 路场景 v5 明显更好。
+
+### 0.2 三个硬约束（换引擎前必须知道）
+
+1. **两引擎不能共存**：各占本卡 90%+（v4 44,440–47,940 MiB；v5 专家缓存 35.54 GiB + 4×0.86 GiB slot + 权重）。
+   没有"影子部署"这条路，切换 = 停机切换（约 1–2 分钟）。
+2. **停旧后必须等显存真正释放**：`ft_stop.sh` 报"干净停止"时 `nvidia-smi` 仍显示 47,712 MiB 被占，
+   新引擎 `cudaMalloc` 直接 OOM。**判据是 used <1000 MiB，不是进程消失。**
+   （本次漏这步 → nginx 502 五分钟，`/var/log/nginx/error.log` 留下
+   `connect() failed (111: Connection refused) to upstream http://127.0.0.1:8000`。）
+3. **KV 必须流式**：`--kv-resident 0`（KV 全放显存）实测直接 OOM
+   （`native dense upload blk.27.attn_output.weight: out of memory`）。
+
+### 0.3 迁移方法
+
+```bash
+# 1. 取源码 + 模型（Strata release 只有 Windows 二进制，Linux 必须自建）
+gh repo clone Niko1221/Strata
+modelscope download --model unsloth/Qwen3.8-Flash-Next-GGUF UD-Q4_K_XL/* --local_dir <模型目录>
+
+# 2. setup（STRATA_UV=1 强制 py3.12；系统 python3 是 3.14，NVIDIA wheel 不齐）
+STRATA_UV=1 ./setup.sh --setup --family unsloth --model UD-Q4_K_XL \
+  --gguf-dir <模型目录> --source modelscope --context 262144 \
+  --kv k8v4 --parallel 4 --experimental-speed-projection on \
+  --host 127.0.0.1 --port 8000 --yes --no-start
+
+# 3. 装修复版 chat 模板（setup 从 GGUF 解出的原装模板会差 42 个 token）
+cp froggeric-v22.5/chat_template.jinja \
+   Strata-data/packs/<模型>/tokenizer/chat_template.jinja
+
+# 4. 启动 + 核验
+setsid bash run_strata.sh > strata-prod.log 2>&1 &
+```
+
+### 0.4 本次踩到的坑
+
+| 坑 | 现象 | 修法 |
+|---|---|---|
+| **显存竞态** | 停 v4 后立刻起 v5 → `cudaMalloc` OOM，业务挂 5 分钟 | 轮询 `nvidia-smi` 到 used <1000 MiB 再起（已写进 `stop_strata.sh`/`switch_engine.sh`） |
+| **模板被覆盖** | v5 用 GGUF 原装模板，同一 prompt 渲染 2378 vs v4 的 2336 | 把 froggeric v22.5 装进 pack，并把守卫**挂在启动器**上（`setup` 每次都会重新解出） |
+| **`./setup.sh` 绕过守卫** | 直接跑 setup 会自己拉起模型，模板变回原装 | 一律用 `run_strata.sh` 起服务 |
+| **ESP 家族门** | Unsloth 家族被上游 `left off` | 原文是 **"not tested"** 非不兼容；引擎 cvec 对量化无关 ⇒ 对 `setup.py` 打一处白名单补丁（原件备份 `setup.py.orig-esp`） |
+| **默认思考档误判** | 我据 Strata 文档以为默认从 medium 变 high | 实测**没变**：froggeric 模板第 17 行 `_default_reasoning_effort='medium'` 自己定默认，且引擎不覆盖它 |
+
+### 0.5 验证结果（2026-10-13）
+
+- `:8000` 与 `:8001` 均 HTTP 200；端到端推理经API key 返回正常，**0.385 秒**
+- **破限生效判据行**：`control vector mode = project, dir = per-layer, layers 4..44 (41 steered)`
+- 并发生效：`--batch: 4 slot sessions on CUDA0 (0.86 GiB each)`、`batch windows of up to 4 sequences`
+- 上下文：`/v1/models` 报 `n_ctx: 262144`
+- 模板对齐：同一 prompt 渲染 token 数 2336（= v4）
+- 默认思考档：不指定 == 显式 medium（思考字符数逐字吻合）
+- 破限强探针（14 条，ESP 逐请求切换）：**关 = 14/14 拒答，开 = 0/14**；v4 abliterated 亦 0/14
+
+### 0.6 未验证
+
+长上下文（128K/256K）实测、多日稳定性、8 路以上并发扩展性、`switch_engine.sh` 的真实切换+回滚路径、
+质量标准样本（仅 15 题数学 15/15，不构成质量结论）。
+
+---
+
+## 1. 为什么切到 FreeToken（v4，2026-09-24，回滚目标）
 
 v3（sglang + lk_moe）的瓶颈是**架构性**的：experts 在 CPU 上算，decode 速度受 CPU 算力与单步同步延迟限制，
 长上下文 decode 卡在 ~42 t/s，加载要 ~5.5 分钟。FreeToken 恰好是为「权重驻内存 + CPU 算 experts」
