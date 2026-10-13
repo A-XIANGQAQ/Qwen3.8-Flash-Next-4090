@@ -2,10 +2,10 @@
 
 全部为实测踩坑记录。
 
-> **适用性标记**（2026-09-24 起引擎为 v4 = FreeToken）：
-> 🟢 **通用**（两代引擎都适用）｜🟡 **v4 适用**｜⚪ **已归档**（v3 sglang 栈专属，脚本与补丁仍保留可复现）
+> **适用性标记**（2026-10-13 起引擎为 **v5 = Strata**；v4 = FreeToken 已转为回滚路径）：
+> 🟢 **通用**（多代引擎都适用）｜🟡 **v4 适用**（FreeToken）｜🔵 **v5 适用**（Strata）｜⚪ **已归档**（v3 sglang 栈专属，脚本与补丁仍保留可复现）
 >
-> 编号保持不变，以免其它文档里的交叉引用失效。
+> 编号保持不变，以免其它文档里的交叉引用失效。**🔵 #29 起为 v5 专属坑**（页面末尾）。
 
 ## 🟢 1. 启动 OOM：47.7GB ngram 表被塞进 GPU (Boot OOM: 47.7GB n-gram table to GPU)
 
@@ -222,6 +222,80 @@ FreeToken 调度里 prefill 默认无条件优先，长 prompt 的 prefill 会�
 **修复**：`patches/06`（上游 PR #484 重放）+ `--decode-interleave-every 2` → 最长冻结 **7.5s**（-58%）。
 
 ⚠️ **N 必须按自己的 prompt 长度定**：43K prompt 只有 6 个 prefill 块，作者在 PR 里推荐的 N=8 永远到不了阈值、完全无效。
+
+---
+
+# v5（Strata）专属坑
+
+## 🔵 29. 切换引擎时 `cudaMalloc` OOM：停旧 ≠ 显存已释放
+
+`ft_stop.sh` 打印"干净停止"时，`nvidia-smi` 仍显示 **47,712 MiB 被占**；立刻起 Strata 直接炸：
+
+```
+cudaMalloc(1485606400) for the weight arena failed (out of memory): 489 MiB of 48533 MiB VRAM free
+```
+
+**判据是显存降到 <1000 MiB，不是进程消失**：
+
+```bash
+nvidia-smi --query-gpu=memory.used --format=csv,noheader   # 轮询到 <1000 再起下一个
+```
+
+（2026-10-13 因漏这步，业务被 nginx 502 了 5 分钟。）
+
+## 🔵 30. `--kv-resident 0` 必 OOM：KV 流式不是"优化项"
+
+KV 全放显存会报 `native dense upload blk.27.attn_output.weight: out of memory`。
+48GB 卡上 4×256K 的**唯一可行解**就是 KV 流式到宿主内存（`--kv-resident 32768`）。
+实测 `PCIe probe: 25.3 GB/s host→device`。
+
+⚠️ Strata 的 KV 只有 `fp16 | int8 | k8v4 | q4_0`，**没有 fp8**（fp8 仅用于 PLE 表）。
+`kv_tok = 13 × cell`：int8 = 1056 B/cell、**k8v4 = 816**、q4_0 = 576
+（q4_0 长文困惑度 +8%(1K) / +12%(8K)，256K 下不可用）。
+
+## 🔵 31. 不加 `--batch-mtp`：MTP 收益静默消失
+
+批处理会退化成"没有 MTP 的那套行为"：实测 4 路聚合仅 **131 t/s**（加后 137）、2 路 103–112（加后 123–125）。
+**不报错、不警告，只是变慢**——上游 `docs/BATCHING.md` 原文如此。
+
+## 🔵 32. `setup.sh` 每次都会覆盖 chat 模板
+
+Strata 每次 `setup` 都从 GGUF **重新解出** `<pack>/tokenizer/chat_template.jinja`，手工替换必被覆盖。
+后果不是报错而是**静默换模板**：同一 prompt 渲染 **2378（原装） vs 2336（froggeric）** token，
+且**默认思考档随之改变**（见 #33）。
+
+**修复**：把"应用模板"挂在**启动器**上（幂等、fail-open），并且**不要用 `./setup.sh` 无参起服务**——
+它会自己拉起模型并绕开守卫。
+
+## 🔵 33. 默认思考档由 chat 模板决定，不是引擎
+
+上游文档说"默认 high"，那说的是**原装模板**的行为。本站用 froggeric v22.5，第 17 行写死
+`_default_reasoning_effort = 'medium'` ⇒ 实测"不指定"与显式 `medium` 的思考长度**逐字吻合**（273 字符），
+`high` 是 451。**⇒ 换到 Strata 后默认档没有变。**
+
+另：`/v1/models` advertise 的枚举会**少于**实际支持——启动日志里是
+`supported=['high','low','max','medium','minimal','none','xhigh'] default=medium`。**别只信 `/v1/models`。**
+
+## 🔵 34. `--batch N` 不是 `n_ctx ÷ N`
+
+Strata 的 `--batch N` 是**每 slot 独立 session**（VRAM 与主 session 同量，≈0.86 GiB/槽），
+**不是** llama.cpp 那套切分。按 llama.cpp 直觉去算 KV 会低估显存好几倍。
+
+## 🔵 35. ESP 破限默认对 unsloth 家族关闭
+
+上游只对 `family in ("qwen","coder")` 开放实验性投影，Unsloth 家族被 left off。
+但 `UNSLOTH_Q4.md` 原文是 **"not tested"**（不是"不兼容"），且 cvec 实现
+（`src/program/generate.cpp:672`）与量化无关 ⇒ 对 `setup.py` 打一处白名单补丁（备份 `setup.py.orig-esp`）后
+ESP 在 UD-Q4_K_XL 上实测生效（强探针：ESP 开 0/14 拒答、关 14/14）。
+
+## 🔵 36. 引擎进程名就叫 `strata`，可以放心用 `pgrep -x`
+
+与 FreeToken 不同，v5 的引擎二进制名就是 `strata`，**精确匹配不会自匹配**（对照 #12 的自匹配陷阱）：
+
+```bash
+pgrep -x strata                                # 引擎
+ps -eo pid,args | grep '[s]erve/server.py'     # serve 层（方括号写法避免自匹配）
+```
 
 ---
 

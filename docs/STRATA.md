@@ -5,9 +5,13 @@
 > 版本全景见 [UPGRADE.md](UPGRADE.md)，实测数据见 [BASELINE.md](BASELINE.md)。
 
 > [!IMPORTANT]
-> **v5 不用补丁。** v4 的三个本地补丁（rendezvous 避让 / workload / decode-interleave）是 FreeToken 特有问题的
-> 修补；Strata 路线上这些问题不存在（并发是原生 `--batch`，端口无 rendezvous 概念）。
-> ⇒ **v5 是"少维护"而非"多维护"的升级**：`patches/` 目录仅为 v4 回滚保留。
+> **v5 不需要 v4 那三个补丁。** 它们是 FreeToken 特有问题的修补，Strata 路线上这些问题不存在
+> （并发是原生 `--batch`，端口无 rendezvous 概念）。
+> ⇒ **v5 是"少维护"而非"多维护"的升级**：`patches/04–06` 仅为 v4 回滚保留。
+>
+> ⚠️ 但 **v5 自带一处主线补丁**：[`patches/07_strata_esp_family_whitelist.patch`](../patches/07_strata_esp_family_whitelist.patch)
+> ——上游把实验性投影锁在 `family in ("qwen","coder")`，unsloth 家族拿不到破限（见 §4）。
+> **这不是回滚用的补丁，v5 必须打。**
 
 ---
 
@@ -65,7 +69,11 @@ gh repo clone Niko1221/Strata
 #    commit 见 setup.py 的 LLAMA_CPP_COMMIT = 3cf03257f219afbe7334045ff7c6a06ac68c627d
 unzip llama.cpp-3cf0325.zip -d third_party/ && mv third_party/llama.cpp-3cf0325 third_party/llama.cpp
 
-# 3. setup（STRATA_UV=1 强制 Python 3.12；系统 python3 是 3.14，NVIDIA wheel 不齐）
+# 3. ESP 白名单补丁（**必须在 setup 之前打**——setup.py 就是被改的那个文件）
+cp setup.py setup.py.orig-esp
+patch -p1 < /path/to/repo/patches/07_strata_esp_family_whitelist.patch
+
+# 4. setup（STRATA_UV=1 强制 Python 3.12；系统 python3 是 3.14，NVIDIA wheel 不齐）
 STRATA_UV=1 ./setup.sh --setup --family unsloth --model UD-Q4_K_XL \
   --gguf-dir <模型目录> --source modelscope \
   --vision no --context 262144 --kv k8v4 --parallel 4 \
@@ -76,8 +84,8 @@ STRATA_UV=1 ./setup.sh --setup --family unsloth --model UD-Q4_K_XL \
 编译在 **76 核上约 1 分钟**（`[138/138] Linking CXX executable strata`），产出 `engine/strata`（59 MB），
 `BUILD.json` 记 `archs: [89]`、CUDA 13.2。
 
-> 💡 **构建与下载可重叠**：setup 的引擎编译（step 4）在模型下载（step 5）之前。
-> 下载期间先跑 setup 让它把引擎编好，模型到位后再跑一次补齐 step 6–7。
+> 💡 **构建与下载可重叠**：`setup.sh` **内部**的引擎编译步骤排在模型下载步骤之前。
+> 下载期间先跑一次 setup 让它把引擎编好，模型到位后再跑一次补齐后续步骤。
 
 ---
 
@@ -103,7 +111,9 @@ v4 的破限来自 **checkpoint 本身**（abliterated 权重）。v5 用的模�
 
 > ⚠️ **ESP 的家族门**：上游只对 `family in ("qwen","coder")` 开放，Unsloth 家族被 `left off`。
 > 查证 `UNSLOTH_Q4.md` 原文是 **"not tested"**（非不兼容），且引擎 `src/program/generate.cpp:672`
-> 的 cvec 实现对量化无关 ⇒ 本项目对 `setup.py` 打了一处白名单补丁（原件备份 `setup.py.orig-esp`）。
+> 的 cvec 实现对量化无关 ⇒ 本项目对 `setup.py` 打了一处白名单补丁
+> （[`patches/07`](../patches/07_strata_esp_family_whitelist.patch)，原件备份 `setup.py.orig-esp`）。
+> **不打它，`--experimental-speed-projection on` 对 unsloth 家族静默无效**；打法见 §3 step 4。
 
 ---
 

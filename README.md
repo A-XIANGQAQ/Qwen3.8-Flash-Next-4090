@@ -1,11 +1,15 @@
 # Qwen3.8-Flash-Next on single RTX 4090 48GB
 
-一份面向**单卡 RTX 4090（SM89，48GB）**的 Qwen3.8-Flash-Next-NVFP4 混合推理部署指南。
+一份面向**单卡 RTX 4090（SM89，48GB）**的 Qwen3.8-Flash-Next 混合推理部署指南。
+**当前路线 v5 = Strata + 4-bit GGUF（`UD-Q4_K_XL`，111.33 GB）**；NVFP4 是 v4（RadixArk checkpoint + FreeToken 0.1.3），
+已折叠为回滚路径——本仓库不再以 NVFP4 为身份。
 
 > [!WARNING]
 > 社区实验复现，非官方支持方案。请勿表述为"SM89 已获上游官方支持"。
-> **v5（Strata）不需要任何本地补丁**；v4 栈依赖**三个未上游化的本地补丁**（其中 decode-interleave 对应的
-> 上游 PR #484 仍是 OPEN）——这些补丁仅为 v4 回滚路径保留。
+> **v5（Strata）不需要 v4 那三个补丁**——它们是 FreeToken 特有问题的修补，Strata 上不存在
+> （并发是原生 `--batch`，端口无 rendezvous 概念）。但 **v5 有自己的 [patch 07](patches/07_strata_esp_family_whitelist.patch)**：
+> 上游把实验性投影锁在 `family in ("qwen","coder")`，unsloth 家族拿不到破限（见 [STRATA.md §4](docs/STRATA.md)）。
+> v4 的三个补丁（其中 decode-interleave 对应的上游 PR #484 仍是 OPEN）仅为回滚路径保留。
 >
 > ⚠️ **Strata 是 3 周龄的新引擎**（790 open issues），且走投机解码 ⇒ 输出与 v4 非逐位一致。
 > 本仓库不宣称"质量等价"，只报告实测的速度与拒答率。
@@ -18,20 +22,22 @@
 | [TomPython/Qwen-3.8-Flash-Next](https://github.com/TomPython/Qwen-3.8-Flash-Next) | 双 RTX 4090 24GB + 1TiB | Docker 三层镜像 | 双卡专用 |
 | **[Niko1221/Strata](https://github.com/Niko1221/Strata)** | 上游只发 **Windows** 二进制，未见单卡 4090 + 本模型的组合记录 | 自有引擎 + MoE 专家 offload + MTP | 需 Linux 自建与参数（[见 v5 路线](docs/STRATA.md)） |
 | **[FlashML-org/FreeToken](https://github.com/FlashML-org/FreeToken)** | 上游未给出本模型的单卡 4090 组合 | MoE offload 混合推理（CPU 算 experts） | 需本项目补丁与参数（见下） |
-| **本项目** | **单 RTX 4090 48GB** | **v5 = Strata**（自带 offload，**无补丁**）；v4 = FreeToken + [三个本地补丁](patches/)（保留作回滚） | ✅ |
+| **本项目** | **单 RTX 4090 48GB** | **v5 = Strata**（自带 offload，仅需 [patch 07](patches/07_strata_esp_family_whitelist.patch) 放行 ESP）；v4 = FreeToken + [三个本地补丁](patches/)（保留作回滚） | ✅ |
 
 要点：**111 GB 4-bit 权重驻内存（CPU 计算 experts）+ GPU 算 attention/PLE/常驻层**——让单卡 48GB 显存跑 176B 模型（6B active）。
-v5 与 v4 的差别只在**引擎**，模型同为 Qwen3.8-Flash-Next。
+v5 与 v4 跑的是**同一基座模型**（Qwen3.8-Flash-Next），差别在**引擎 + 权重格式**：
+v5 = GGUF `UD-Q4_K_XL` + Strata，v4 = NVFP4 + FreeToken。两边**位宽都是 4-bit**——这是刻意对齐的，
+否则质量差异会混进速度结论（见 [STRATA.md §2](docs/STRATA.md)）。
 
 ## 已验证组合 (Verified Stack)
 
-**当前推荐：v5 = Strata 0.1.43.1**（2026-10-13 起，**不需要任何本地补丁**；切换记录见 [升级文档](docs/UPGRADE.md)，
-完整路线说明见 [v5 路线文档](docs/STRATA.md)）
+**当前推荐：v5 = Strata 0.1.43.1**（2026-10-13 起；只需 [patch 07](patches/07_strata_esp_family_whitelist.patch) 放行 ESP，
+**v4 那三个补丁与本路线无关**。切换记录见 [升级文档](docs/UPGRADE.md)，完整路线说明见 [v5 路线文档](docs/STRATA.md)）
 
 | 层 | 固定身份 |
 |---|---|
 | 模型 | `unsloth/Qwen3.8-Flash-Next-GGUF` → **UD-Q4_K_XL**（ModelScope，111.33 GB / 4 shards，**4-bit**） |
-| 引擎 | **[Niko1221/Strata](https://github.com/Niko1221/Strata) `0.1.43.1`**（Linux 自建；CUDA 13.2 / sm89 / `BUILD.json archs:[89]`）——**无本地补丁** |
+| 引擎 | **[Niko1221/Strata](https://github.com/Niko1221/Strata) `0.1.43.1`**（Linux 自建；CUDA 13.2 / sm89 / `BUILD.json archs:[89]`）——仅需 [patch 07](patches/07_strata_esp_family_whitelist.patch)（ESP 家族白名单） |
 | 并发 / 上下文 | `--batch 4` × `--max-context 262144`（每 slot 独立 session） |
 | KV | **`k8v4` + `--kv-resident 32768`**（816 B/cell；KV 流式到宿主内存——4×256K 全放显存会 OOM） |
 | 破限 | **引擎自带 ESP 控制向量**（480 KB，层 4–44，逐请求可关）；强探针关=14/14 拒答、开=0/14 |
@@ -55,9 +61,10 @@ v5 与 v4 的差别只在**引擎**，模型同为 Qwen3.8-Flash-Next。
 
 </details>
 
-> 单卡 24GB 原版未验证（sglang 路线下 cache+权重 GPU 部分 ~30GB 超出）。**启动需 memlock 放开**
-> （`ulimit -l unlimited`）—— FreeToken 下这是为了**专家 host banks 的 mlock 常驻**（PLE 表默认走
-> `--ple-backend disk`，io_uring + O_DIRECT，不占锁页内存）。仓库启动脚本已内置。
+> 单卡 24GB 原版未验证（sglang 路线下 cache+权重 GPU 部分 ~30GB 超出）。v4 启动器内置
+> `ulimit -l unlimited` + 自动 sudo 作**保守默认**；但 **2026-10-02 实测这两项在本机都不是必需的**——
+> 非 root 启动成功 3 次，运行中 `VmLck: 0 kB`（offload 走 PINNED；mlock 只服务 CPU-executor 路径，
+> 本栈用不到）。PLE 表默认走 `--ple-backend disk`（io_uring + O_DIRECT），不占锁页内存。
 
 ## 实测摘要 (Measured Results)
 
@@ -110,6 +117,38 @@ v5 与 v4 的差别只在**引擎**，模型同为 Qwen3.8-Flash-Next。
 
 ## 快速开始 (Quick Start)
 
+### v5（当前推荐）= Strata + GGUF，只需 [patch 07](patches/07_strata_esp_family_whitelist.patch)
+
+```bash
+# 1. 取源码
+gh repo clone Niko1221/Strata && cd Strata
+
+# 2. ESP 白名单补丁（**必须在 setup 之前打**，否则 unsloth 家族拿不到破限）
+cp setup.py setup.py.orig-esp
+patch -p1 < /path/to/repo/patches/07_strata_esp_family_whitelist.patch
+
+# 3. 构建 + 下模型 + 生成配置（Linux 无预编译包——上游 release 只有 Windows 二进制）
+STRATA_UV=1 ./setup.sh --setup --family unsloth --model UD-Q4_K_XL \
+  --gguf-dir /path/to/UD-Q4_K_XL --source modelscope \
+  --vision no --context 262144 --kv k8v4 --parallel 4 \
+  --experimental-speed-projection on \
+  --host 127.0.0.1 --port 8000 --yes --no-start
+# 76 核上约 1 分钟编完，产出 engine/strata（59 MB）
+
+# 4. 启动（chat 模板守卫挂在启动器上，见下）
+setsid bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
+# 就绪标志：日志行 "ready:"（约 50 秒）
+```
+
+⚠️ **必须用启动器启动，不要用 `./setup.sh` 无参直接起服务**——它每次都从 GGUF 重解出**原装** chat 模板，
+绕开守卫（同一 prompt 渲染差 42 token，默认思考档也不同）。构建细节与关键配置项
+见 [v5 路线文档](docs/STRATA.md)，逐条命令见 [完整复现](docs/REPRODUCTION.md)。
+
+### v4（回滚路径）= FreeToken + NVFP4 + 三个本地补丁
+
+<details>
+<summary>展开 v4 的安装与启动步骤</summary>
+
 ```bash
 # 1. 环境安装（uv + PyPI wheel，含版本约束说明）
 uv venv ~/ft-venv --python 3.12
@@ -127,8 +166,13 @@ bash scripts/start_freetoken.sh
 ```
 
 **端口**：只需要指定 API 端口（`--port`）。FreeToken 内部的 rendezvous 端口会**自动挑空闲的**
-（从 API 端口+1 起向上找）——它是实现细节，不该成为部署约束：相邻端口被任何进程占用都不会挡启动。
+（补丁 04，从 API 端口+1 起向上找）——它是实现细节，不该成为部署约束：相邻端口被任何进程占用都不会挡启动。
 需要固定时显式设 `FT_DIST_PORT`。
+
+</details>
+
+⚠️ **两个引擎各占本卡 90%+ 显存，任何时刻只能活一个**；切换是停机切换，且**停旧后必须等显存降到 <1000 MiB
+再起新**（判据不是进程消失）。详见 [运维手册](docs/OPERATIONS.md)。
 
 详细步骤见 [docs/REPRODUCTION.md](docs/REPRODUCTION.md)。
 

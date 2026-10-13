@@ -46,15 +46,23 @@ bash strata/stop_strata.sh                                  # 停 v5（含显存
 ## 2. 观察 (Observe)
 
 ```bash
-python3 ft_stats.py                 # /v1/stats + cache status + nvidia-smi 一览
+# ── v5（Strata）─────────────────────────────
+tail -f strata/strata-prod.log       # 关注: Traceback / OOM / Xid / 就绪行 "ready:"
+pgrep -x strata                      # 引擎存活（精确匹配，不会自匹配）
+nvidia-smi --query-gpu=memory.used --format=csv,noheader   # 起停前后的显存判据
+free -h                              # v5 实测: 68Gi used / 198Gi buff-cache（含 mmap 的 GGUF）
+
+# ── v4（FreeToken）──────────────────────────
+python3 ft_stats.py                  # /v1/stats + cache status + nvidia-smi 一览
 curl -s localhost:8000/v1/stats      # kv/mamba 池、累计 token、ttft 均值/p95
+tail -f /tmp/ft.log                  # 关注: Traceback / OOM / Xid / swap 增长
+
+# ── 通用 ───────────────────────────────────
 curl -s localhost:8000/v1/models
 watch -n 1 nvidia-smi
-free -h                             # 模型 126GiB resident + 专家 banks ≈ 200GB
-tail -f /tmp/ft.log                 # 关注: Traceback / OOM / Xid / swap 增长
 ```
 
-`ft_stats.py` 与 `/v1/stats` 提供的 TTFT 统计是**服务端口径**，与客户端计时不同——结论以客户端计时为准（见 BASELINE）。
+`ft_stats.py` 与 `/v1/stats`（v4）提供的 TTFT 统计是**服务端口径**，与客户端计时不同——结论以客户端计时为准（见 BASELINE）。
 
 ## 3. 停止 / 重启 (Stop / Restart)
 
@@ -82,8 +90,11 @@ wedge 住的记录（#526，重建 OOM 后无法回滚）。
 
 ## 4. 日志 (Logs)
 
-- `/tmp/ft.log`（启动脚本指定；每次启动截断重写）
-- 关键日志行：
+- **v5（Strata）**：`strata/strata-prod.log`（启动器重定向）。
+  两个必看行：**就绪** `ready: http://127.0.0.1:8000/v1 ... context 262144 tokens`；
+  **破限判据** `control vector mode = project, dir = per-layer, layers 4..44 (41 steered)`。
+- **v4（FreeToken）**：`/tmp/ft.log`（启动脚本指定；**每次启动截断重写——重启前先备份**）
+- v4 关键日志行：
   - `Parsed arguments:`——**全部生效参数**，排查配置问题先看这行
   - `PLE disk backend: io_uring, O_DIRECT`——PLE 表走磁盘后端（不占锁页内存）
   - `Allocating 265216 tokens for KV cache, K + V = 6.26 GiB`——KV 池大小
@@ -116,7 +127,11 @@ curl -s localhost:8000/v1/messages -H 'Content-Type: application/json' -H 'anthr
 前缀缓存命中数可从 `usage.prompt_tokens_details.cached_tokens` 读出（启动脚本开了 `--enable-cache-report`）；
 Anthropic 格式对应 `usage.cache_read_input_tokens`。
 
-## 6. 边界行为 (Boundary Behavior)
+## 6. 边界行为 · v4 (Boundary Behavior · FreeToken)
+
+> ⚠️ **本节整段是 v4 的调度与池化行为，不适用于 v5。** v5 的对应语义差别很大：
+> 并发是**每 slot 独立 session**（不是共享池），KV **每 slot 独立**且可流式到宿主内存
+> （`--kv k8v4 --kv-resident 32768`），**没有 mamba 槽**这套东西。见 [STRATA.md §5](STRATA.md)。
 
 - 上下文上限 262144；KV 是**单一共享池** 265216 tokens（启动时预分配，不随上下文伸缩）
 - 长上下文的并发上限由 **mamba 槽**决定：`slots = 4*mrr + max(4, 2*mrr) + 1`

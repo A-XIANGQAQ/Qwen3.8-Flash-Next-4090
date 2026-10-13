@@ -1,0 +1,38 @@
+# 补丁 07：把 unsloth 家族纳入实验性投影（ESP）白名单
+#
+# 目标：Strata 源码根目录的 setup.py（<Strata>/setup.py，356 KB 的自带脚本）
+#
+# 问题：Strata 的 experimental speed projection（ESP，破限用的 480 KB 控制向量）在 setup.py 里
+#   有一道家族门——`if family in ("qwen", "coder")`，Unsloth 家族被 left off。而 Unsloth 的
+#   UD-Q4_K_XL 正是**同一个 Qwen3.8-Flash-Next 基座的量化版**：官方文档 UNSLOTH_Q4.md 的原话是
+#   **"not tested"**（没测过），不是"不兼容"；引擎侧的 cvec 实现（src/program/generate.cpp）
+#   对量化格式并不敏感。⇒ 不放开这道门，GGUF 路线上就只能拿一个**未破限**的模型对外服务。
+#
+# 本补丁的做法：把 "unsloth" 加进白名单元组，仅此一行（外加注释）。
+#
+# 实测效果（同一引擎、同一进程、仅逐请求切换 experimental_speed_projection）：
+#   ESP 关 → 强探针 14/14 拒答；ESP 开 → 0/14。与 v4 的 abliterated checkpoint 等效。
+#
+# 打法（在 Strata 源码根目录）：
+#   cp setup.py setup.py.orig-esp                       # 先备份原件
+#   patch -p1 < patches/07_strata_esp_family_whitelist.patch
+#   # 或：git apply patches/07_strata_esp_family_whitelist.patch
+#
+# ⚠️ 与补丁 04/05/06 不同：那三个打在 FreeToken 的 site-packages 上，只为 v4 回滚路径保留；
+#    本补丁打在 **Strata 源码**上，**属于 v5 主线**。上游若放宽了白名单，本补丁可弃。
+
+diff --git a/setup.py b/setup.py
+--- a/setup.py
++++ b/setup.py
+@@ -5419,7 +5419,10 @@
+     # chosen here; with it loaded, the web app and the API switch it off per request
+     esp = None
+     esp_choice = (a.experimental_speed_projection or "").strip()
+-    if family in ("qwen", "coder"):                   # the Coder: the same model's residual stream
++    if family in ("qwen", "coder", "unsloth"):        # [local patch] unsloth 是同一基座模型的量化版——
++                                                      # UNSLOTH_Q4.md 自述 "not tested"（非"不兼容"），
++                                                      # 且引擎 src/program/generate.cpp 的 cvec 实现
++                                                      # 与量化无关 ⇒ 纳入白名单。
+         if not esp_choice:
+             say()
+             say("  EXPERIMENTAL - speed projection: a small control vector applied while the model runs (layers 4-44).")
