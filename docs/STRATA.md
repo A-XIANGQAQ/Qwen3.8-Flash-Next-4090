@@ -126,7 +126,7 @@ v4 的破限来自 **checkpoint 本身**（abliterated 权重）。v5 用的模�
 --kv-resident 32768          # KV 流式（见 §5.1）
 --batch-mtp                  # 每 slot 每窗口验证一个 MTP 提议（见 §5.2）
 --conversation-cache-mib 8192
---prefill auto:32768
+--prefill auto:32768         # 见 §5.4：引擎的 #669 警告建议 auto，但实测 32768 快 ~20%
 --control-vector-scaled … --cvec-mode project --cvec-dir per-layer    # 破限
 --resident-budget-gib 71     # 全部专家驻宿主内存
 ```
@@ -208,6 +208,32 @@ those）」——重跑会抹掉 `--kv-resident 32768` / `--batch-mtp` / `--conv
 
 > 📌 **下载提示**：HF 走代理单连接实测仅 ~220–400 KB/s（0.91 GB 要 40+ 分钟）；
 > 换 **12 路并行 range 分块**后聚合 **4.1 MB/s**（约 4 分钟）。单连接被限速时值得分块。
+
+### 5.4 prefill 块大小：引擎的 #669 警告在这里帮了倒忙
+
+引擎启动时会警告：
+
+```
+WARNING: a prompt chunk of 32768 tokens lends 4326 cache slots to the prompt path,
+but only 0 of their experts fit in RAM: the others are read from the SSD on every chunk,
+and prompts can read ~3x slower than with --prefill auto (#669).
+A smaller --prefill, or auto, keeps them all in RAM
+```
+
+看着像必须改。**但单变量实测推翻了它**（同机、同一批固定 prompt、每次用全新唯一前缀避开前缀缓存、各 2 次）：
+
+| `--prefill` | 引擎选的块 | 借用的显存槽 | 22K prompt | 72K prompt |
+|---|---|---:|---:|---:|
+| `auto` | **8192** | 1248（3.67 GiB） | 2,416 t/s | 2,780 t/s |
+| **`auto:32768`** ← 用这个 | **32768** | 4326（12.64 GiB） | **2,905 t/s** | **3,403 t/s** |
+
+⇒ **`auto:32768` 快约 20%**，尽管它每次都从 SSD 现读专家。大块摊销得更好，警告说的"~3x"在这台机器上没有兑现。
+（`auto` 的实测值两次几乎完全一致：34K→2406/2427、110K→2790/2770，不是噪声。）
+
+> ⚠️ 这与 `--moe-strategy auto`（#24）是**同一类教训**：引擎的启发式是按一般机器调的，
+> **不等于你机器上的最优**——只有单变量上机实测才定案。
+>
+> ⚠️ 顺带：`run_strata.sh` 用 `> strata-prod.log` **会截断日志**。重启前想留证据的话改成 `>>` 或先备份。
 
 ---
 
