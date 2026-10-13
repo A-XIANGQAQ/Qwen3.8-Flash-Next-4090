@@ -310,6 +310,22 @@ pgrep -x strata                                # 引擎
 ps -eo pid,args | grep '[s]erve/server.py'     # serve 层（方括号写法避免自匹配）
 ```
 
+## 🔵 37. `400 this server was started without the vision encoder`
+
+发图直接被 serve 层挡回这个 400（`serve/server.py` 在 `self.vision is None` 时抛）。
+
+**不是坏了，是没装**：Strata 的图像能力要三件东西同时在位——mmproj 文件 + `engine/strata-vision` 二进制 +
+配置里的 `vision` 段。而 setup **默认不装**：交互式会问，非交互（`--yes`）下按默认「不要」走。
+本站 2026-10-13 之前一直如此（**v4 时代也没有 mmproj**，不是换引擎弄丢的）。
+
+⚠️ 别误判成"模型不支持图"：`MODELS["UD-Q4_K_XL"]` 的 `vision` 是 **`True`**（允许装，只标了 untested）。
+
+装法与代价见 [STRATA.md §5.3](STRATA.md)。三条要点：
+
+- **手工装，别重跑 `setup.sh`**——`carry_over()` 会丢掉手加到 `args` 的引擎选项
+- 配置里补上 `vision` 段后，serve 层会自己加 `--vision --vram-reserve-mib 700`，不必改 `args`
+- **必须重启**才生效（编码器在引擎之前预热，引擎据此规划显存）
+
 ---
 
 ## 立即停止条件 (Stop conditions)

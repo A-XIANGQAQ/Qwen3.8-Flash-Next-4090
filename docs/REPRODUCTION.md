@@ -103,7 +103,7 @@ patch -p1 < /path/to/repo/patches/07_strata_esp_family_whitelist.patch
 # 4. setup：编译引擎 + 下模型 + 生成配置（--no-start 先不起服务）
 STRATA_UV=1 ./setup.sh --setup --family unsloth --model UD-Q4_K_XL \
   --gguf-dir <模型目录> --source modelscope \
-  --vision no --context 262144 --kv k8v4 --parallel 4 \
+  --vision yes --context 262144 --kv k8v4 --parallel 4 \
   --experimental-speed-projection on \
   --host 127.0.0.1 --port 8000 --yes --no-start
 ```
@@ -126,6 +126,11 @@ modelscope download --model unsloth/Qwen3.8-Flash-Next-GGUF \
 - 约 **111.33 GB / 4 shards**
 - 字节数与 ModelScope API 逐条核对过（下载不完整会以 GGUF 解析失败的形式暴露）
 - ⚠️ **HF 在本机实测仅 234 B/s**，不可用——一律走 ModelScope
+
+**另需视觉编码器（要读图的话，`--vision yes`）**：`mmproj-Qwen3.8-Flash-Next-BF16.gguf`，
+**907,543,008 B**，来自 `ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF`——
+**ModelScope 上没有这个仓库**，只能走 HF 或镜像；配合 `tools/vision` 的 `strata-vision` 二进制使用。
+实测 HF 走代理单连接仅 ~220–400 KB/s，**12 路并行分块可到 4.1 MB/s**。详见 [STRATA.md §5.3](STRATA.md)。
 
 ### 4B. v4（回滚）：`RadixArk/Qwen3.8-Flash-Next-NVFP4`
 
@@ -230,7 +235,8 @@ curl -s localhost:8000/v1/chat/completions \
 - [ ] **端到端真推理**：发一条中文请求，正文可读、无乱码
 - [ ] 模型分片齐（4 shards）、`/v1/models` 返回预期 id
 - [ ] RAM 有余量、swap 为 0、无 Xid/OOM
-- [ ] 显存 ~47GB（实测 **48,438 / 49,140 MiB**）
+- [ ] 显存 ~47GB（装 vision 前实测 **48,438 / 49,140 MiB**；装后 **48,335 / 49,140 MiB**，引擎日志报 329 MiB free）
+- [ ] （装了图的话）发一张测试图，模型能正确描述——并确认 `pgrep -x strata-vision` 有进程
 - [ ] ⚠️ **本次未验证**：长上下文（128K/256K）、工具调用结构化、多日稳定性
 
 **v4（FreeToken）**：

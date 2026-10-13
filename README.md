@@ -41,6 +41,7 @@ v5 = GGUF `UD-Q4_K_XL` + Strata，v4 = NVFP4 + FreeToken。两边**位宽都是 
 | 并发 / 上下文 | `--batch 4` × `--max-context 262144`（每 slot 独立 session） |
 | KV | **`k8v4` + `--kv-resident 32768`**（816 B/cell；KV 流式到宿主内存——4×256K 全放显存会 OOM） |
 | 破限 | **引擎自带 ESP 控制向量**（480 KB，层 4–44，逐请求可关）；强探针关=14/14 拒答、开=0/14 |
+| 图像 | **自带 vision 编码器**（`mmproj-…-BF16.gguf` 0.91 GB，GPU 模式，`tools/vision` 自建）；图像 token 上限 1024，占 ~1.4 GB 显存 |
 | Chat Template | [froggeric v22.5](https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates)（需装进 pack 的 `tokenizer/`；**重装会被覆盖，故挂在启动器上**） |
 | GPU | 单 RTX 4090 **48GB** / sm89 / TP1 |
 
@@ -134,7 +135,7 @@ patch -p1 < /path/to/repo/patches/07_strata_esp_family_whitelist.patch
 # 3. 构建 + 下模型 + 生成配置（Linux 无预编译包——上游 release 只有 Windows 二进制）
 STRATA_UV=1 ./setup.sh --setup --family unsloth --model UD-Q4_K_XL \
   --gguf-dir /path/to/UD-Q4_K_XL --source modelscope \
-  --vision no --context 262144 --kv k8v4 --parallel 4 \
+  --vision yes --context 262144 --kv k8v4 --parallel 4 \
   --experimental-speed-projection on \
   --host 127.0.0.1 --port 8000 --yes --no-start
 # 76 核上约 1 分钟编完，产出 engine/strata（59 MB）

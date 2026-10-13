@@ -76,7 +76,7 @@ patch -p1 < /path/to/repo/patches/07_strata_esp_family_whitelist.patch
 # 4. setup（STRATA_UV=1 强制 Python 3.12；系统 python3 是 3.14，NVIDIA wheel 不齐）
 STRATA_UV=1 ./setup.sh --setup --family unsloth --model UD-Q4_K_XL \
   --gguf-dir <模型目录> --source modelscope \
-  --vision no --context 262144 --kv k8v4 --parallel 4 \
+  --vision yes --context 262144 --kv k8v4 --parallel 4 \
   --experimental-speed-projection on \
   --host 127.0.0.1 --port 8000 --yes --no-start
 ```
@@ -152,6 +152,44 @@ v4 的破限来自 **checkpoint 本身**（abliterated 权重）。v5 用的模�
 
 不加它，批处理退化成"没有 MTP 的那套行为"，实测 4 路聚合仅 131 t/s（vs 加后 137）、2 路 103–112（vs 123–125）。
 上游 `docs/BATCHING.md` 原文如此。
+
+### 5.3 图像：vision 编码器（GPU 模式）
+
+**默认是关的**——setup 交互时会问，非交互（`--yes`）下按默认「不要」走；只有显式 `--vision yes` 才装。
+2026-10-13 本站才第一次装上：此前**这台机器从来没读过图**（v4 时代也没有 mmproj）。
+
+装它要三样东西：
+
+| 件 | 说明 |
+|---|---|
+| `mmproj-Qwen3.8-Flash-Next-BF16.gguf` | **907,543,008 B**（0.91 GB）。来源 `ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF`——**ModelScope 上没有这个仓库**，只能走 HF 或镜像 |
+| `engine/strata-vision` | `cmake tools/vision` + `-DSTRATA_VISION_CUDA=ON`；本站自建产物 **73.75 MB**（引擎 `strata` 不受影响，**不必重编**） |
+| 配置里的 `vision` 段 | `{exe, mmproj, model, gpu, max_tokens}`；`max_tokens` 默认 GPU=1024 |
+
+> 💡 **配置里有 `vision` 段、但 `args` 里没有 `--vision` 时，serve 层会自己补上**
+> `--vision --vram-reserve-mib 700` 并打一行提示 ⇒ 手写配置段即可生效，不必再跑 setup。
+
+**代价（本站实测 2026-10-13）**：
+
+| 项 | 装前 | 装后 |
+|---|---:|---:|
+| 显存 | 48,454 / 49,140 MiB | 48,335 / 49,140 MiB（引擎日志：`329 MiB of VRAM free with everything loaded`） |
+| GPU 专家缓存 | 35.54 GiB | **34.09 GiB**（vision 占掉 ~1.45 GB） |
+| 单流 TTFT | 0.20 s | **0.19 s** |
+| 单流纯解码 | 118 t/s | **121 t/s** |
+
+⇒ **文本速度在噪声内没变**，尽管专家缓存确实少了 1.45 GB。上游预期的「text a few % slower」本站没测出来。
+
+⚠️ **不要为了开图像重跑 `setup.sh`**：`carry_over()` 明确写着「手加到 `args` 的引擎选项不合并（setup chooses
+those）」——重跑会抹掉 `--kv-resident 32768` / `--batch-mtp` / `--conversation-cache-mib 8192` 这些手调项。
+正确做法：手工下 mmproj + 编 `tools/vision` + 往配置里加 `vision` 段。
+
+⚠️ **上游对 UD-Q4_K_XL 的图像标注是 untested**（#967：「用户报告能用，但维护者没在这个文件上跑过图片」）。
+本站自测（2026-10-13，三色横条测试图）4 问全对、含空间顺序：从上到下红/绿/蓝 ✅、最上=红 ✅、最下=蓝 ✅、条数=3 ✅。
+**但样本极小，不构成质量结论。**
+
+> 📌 **下载提示**：HF 走代理单连接实测仅 ~220–400 KB/s（0.91 GB 要 40+ 分钟）；
+> 换 **12 路并行 range 分块**后聚合 **4.1 MB/s**（约 4 分钟）。单连接被限速时值得分块。
 
 ---
 
