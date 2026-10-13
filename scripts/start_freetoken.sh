@@ -2,6 +2,7 @@
 # ==========================================
 # Qwen3.8-Flash-Next-NVFP4 @ single RTX 4090 48GB (SM89)
 # v4 启动脚本：FreeToken 0.1.3 + 三个本地补丁（见 docs/UPGRADE.md）
+# ⚠️ **当前生产是 v5（Strata），见 docs/STRATA.md** —— 本脚本是**回滚路径**
 #
 # 关键参数（都有实测理由，改前先读 docs/BASELINE.md）：
 #   --moe-strategy offload  必须显式固定！跑过 `ft bench bw` 的机器上已落了 profile，
@@ -15,7 +16,8 @@
 #                           作者推荐的 N=8 永远到不了阈值、完全无效。实测最长冻结 17.7s → 7.5s
 #
 # 前置：
-#   · 需要 root 放开 memlock（专家 host banks 走 mlock 常驻）→ 脚本自动 sudo 提权，模型仍以普通用户跑
+#   · 脚本会放开 memlock 并自动 sudo 提权（模型仍以普通用户跑）——这是**保守默认**：
+#     2026-10-02 实测本机非 root + 不放开 memlock 也能起（运行中 VmLck 为 0，offload 走 PINNED）
 #   · cd 到公共目录：spawn 出的 worker 会 chdir 到父进程 cwd，脚本若在 root 外壳里跑
 #     （cwd=/root）子进程会 PermissionError 崩溃
 #   · 就绪判据是日志行 "ready to serve"，不是 /health —— /health 在加载完成前就返回 200（上游 #537）

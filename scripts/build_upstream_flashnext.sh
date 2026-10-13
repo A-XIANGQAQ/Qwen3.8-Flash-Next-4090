@@ -6,7 +6,8 @@
 #   02_ple_cpu_alloc.patch      PLE n-gram 表直接分配到 CPU（48GB 卡必须）
 #   03_resolved_files_v0520.patch  两处需人工裁决的差异（pyproject/modelopt）
 # 详见: docs/UPGRADE.md（v3 历史章节）
-# 注意: 本脚本属于 **v3（sglang）历史路线**，当前生产为 v4（FreeToken），见 scripts/start_freetoken.sh
+# 注意: 本脚本属于 **v3（sglang）历史路线**。当前生产为 **v5（Strata，见 docs/STRATA.md）**；
+#       v4（FreeToken，见 scripts/start_freetoken.sh）为回滚路径
 # 用法: conda activate <目标环境> && bash scripts/build_upstream_flashnext.sh [构建目录]
 # 产物: <构建目录>/wheels/lsglang-1.6.0+flashnext.v0520-py3-none-any.whl
 # 构建期依赖: pip install build setuptools-rust setuptools-scm

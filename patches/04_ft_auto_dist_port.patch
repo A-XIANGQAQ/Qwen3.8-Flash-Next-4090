@@ -16,7 +16,7 @@
 #   3. 显式设置 FT_DIST_PORT 仍然生效（作为起始偏好），被占用时打 WARNING 并顺延。
 #
 # 打法：cd <venv>/lib/python3.12/site-packages && patch -p1 < patches/04_ft_auto_dist_port.patch
-# 上游：无对应 issue（本补丁把原先「只解决本站 8001 冲突」的专用改法泛化为通用能力）
+# 上游：无对应 issue（本补丁把原先「只解决某一个具体端口冲突」的专用改法泛化为通用能力）
 diff --git a/freetoken/server/args.py b/freetoken/server/args.py
 --- a/freetoken/server/args.py
 +++ b/freetoken/server/args.py

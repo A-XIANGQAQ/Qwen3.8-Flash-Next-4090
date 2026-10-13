@@ -17,7 +17,7 @@
 
 ## 1. 为什么换
 
-两条路线跑的是**同一个模型**（Qwen3.8-Flash-Next），差别在引擎。同机、同 prompt、客户端计时、经服务入口：
+两条路线跑的是**同一个基座模型**（Qwen3.8-Flash-Next），差别在引擎与权重格式。同机、同 prompt、同一服务入口、客户端计时：
 
 | 指标 | v4（FreeToken 0.1.3） | **v5（Strata 0.1.43.1）** | 倍率 |
 |---|---:|---:|---:|
@@ -173,7 +173,7 @@ v4 的破限来自 **checkpoint 本身**（abliterated 权重）。v5 用的模�
 
 ## 7. chat 模板必须由脚本保证
 
-本站 v4 一直用 froggeric 修复版模板（`docs/README` 已注明）。切换时发现 **Strata 用的是 GGUF 原装模板**，
+本站 v4 一直用 froggeric 修复版模板（见 [REPRODUCTION §5](REPRODUCTION.md)）。切换时发现 **Strata 用的是 GGUF 原装模板**，
 两者渲染同一 prompt 差了 42 个 token（2378 vs 2336）：
 
 | 模板 | 大小 | 行数 | `reasoning_effort` |
@@ -194,14 +194,18 @@ v4 的破限来自 **checkpoint 本身**（abliterated 权重）。v5 用的模�
 
 ## 8. 运维
 
+> 下表的脚本名是本站的（`run_strata.sh` / `stop_strata.sh`，**本仓库不含这两个文件**——它们是按 §5
+> 的参数写的薄封装）。自建启动器只需两件事：① 启动前跑一次 chat 模板守卫（§7）；
+> ② `exec ./.venv/bin/python ./serve/server.py --engine strata --config <配置>.json --port 8000`。
+
 | 动作 | 命令 |
 |---|---|
-| 启动（约 50 秒就绪） | `setsid bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &` |
-| 停止（约 10–20 秒 + 等显存） | `bash strata/stop_strata.sh` |
-| 引擎互切 | `bash local-tools/switch_engine.sh B`（A=v4, B=v5） |
-| 模板守卫 | 已挂在 `run_strata.sh` + 5 个 v4 启动器上（`ensure_chat_template.sh`，幂等、fail-open） |
+| 启动（约 50 秒就绪） | `setsid bash run_strata.sh > strata-prod.log 2>&1 &` |
+| 停止（约 10–20 秒 + 等显存） | `bash stop_strata.sh`——轮询 `nvidia-smi` 到 used <1000 MiB 才算停干净 |
+| 引擎互切 | 本站用自建的一键脚本（**不在本仓库**；流程见 [OPERATIONS §1b](OPERATIONS.md)） |
+| 模板守卫 | 挂在启动器上（`ensure_chat_template.sh` 式做法，幂等、fail-open）；v4 的启动器同样挂了 |
 
-⚠️ **必须用 `run_strata.sh` 启动，不要用 `./setup.sh`** —— 后者会自己拉起模型并绕过模板守卫。
+⚠️ **必须用启动器启动，不要用 `./setup.sh`** —— 后者会自己拉起模型并绕过模板守卫。
 
 健康判据（三层，缺一不可）：进程 → **破限判据行** → 端到端推理。
 `control vector mode = project, dir = per-layer, layers 4..44 (41 steered)`
@@ -212,7 +216,7 @@ v4 的破限来自 **checkpoint 本身**（abliterated 权重）。v5 用的模�
 
 - **长上下文（128K / 256K）未实测**：配置与显存账支持 4×256K，但没在真实长文下跑过
 - **多日稳定性未测**
-- **`switch_engine.sh` 的真实切换+回滚路径未测**（本次为手工切换）
+- **引擎互切脚本的真实切换+回滚路径未测**（2026-10-13 的切换是手工做的）
 - **8 路以上密集并发的扩展性未测**（本页只有 1/2/4 路）
 - **质量样本仅 15 题数学**（双方 15/15，不构成质量结论）；要做质量结论需上 GSM8K-1319 之类
 - ESP 对普通文本质量的影响未自测（上游报 KL 0.063、困惑度 +15% 代码 / +2.3% 文档 / +0.4% 聊天）

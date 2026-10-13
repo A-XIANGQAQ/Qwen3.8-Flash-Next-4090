@@ -108,7 +108,9 @@
 > **1–2 路交互**（单流快 2×、首字快 14×）→ **v5**；**8 路以上密集并发 / 要最大聚合吞吐** → v4 仍有优势
 > （扩展比 2.55× vs 1.16×）。见本节顶部对照表与 [STRATA.md §1](STRATA.md)。
 
-## 第三方工具交叉验证 (Cross-check · llm_speedtest)
+## 第三方工具交叉验证 · v4 (Cross-check · llm_speedtest)
+
+> 本节是对 **v4** 的独立复测（2026-09-24）。**v5 没有做过第三方交叉验证**——v5 的数字只有本仓库自测。
 
 用 [gengchaogit/llm_speedtest](https://github.com/gengchaogit/llm_speedtest) v3 Python 后端版
 （FastAPI + WebSocket，走它自己的测量代码）对 v4 栈独立复测。2026-09-24，独占窗口，3 次重复：

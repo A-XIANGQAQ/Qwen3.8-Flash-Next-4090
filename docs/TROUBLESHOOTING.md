@@ -7,7 +7,7 @@
 >
 > 编号保持不变，以免其它文档里的交叉引用失效。**🔵 #29 起为 v5 专属坑**（页面末尾）。
 
-## 🟢 1. 启动 OOM：47.7GB ngram 表被塞进 GPU (Boot OOM: 47.7GB n-gram table to GPU)
+## ⚪ 1. 启动 OOM：47.7GB ngram 表被塞进 GPU (Boot OOM: 47.7GB n-gram table to GPU)
 
 症状：启动时 `CUDA out of memory. Tried to allocate 47.69 GiB`（= 51.2B 参数的 ngram 查找表，uint8 存储），堆栈在 `qwen4_exp.py _init_qwen4_exp_layer_extensions → Qwen4ExpPLELayer`。
 
@@ -21,6 +21,9 @@
 
 > v4 说明：FreeToken 默认 `--ple-backend disk`（io_uring + O_DIRECT），PLE 表不常驻 GPU，本坑在 v4 上不复现；
 > 但 v4 有自己的一对参数陷阱，见 #22。
+>
+> 🔵 v5 说明：Strata 走 GGUF，PLE 表按 pack 内的形态加载，上述 `--disable-shared-experts-fusion` /
+> `--max-total-tokens` 那套旋钮**不存在**，本坑不适用。
 
 ## 🟢 2. 工具调用返回 tool_calls: null (Tool calling returns null)
 
@@ -63,14 +66,16 @@
 - v3 sglang API 层收：`none/minimal/low/medium/high/xhigh/max`（ultracode/extreme 在 API 层 400）
 - 模型自带模板只认 `xhigh/medium/low`，`high` 会 400
 - **解决（推荐）**：替换为 froggeric v22.5 模板（原生收全别名，见 REPRODUCTION §5），实测 7 枚举全通过
+- 🔵 **v5**：同样靠模板解决，但注意**默认档由模板而非引擎决定**，且 `/v1/models` 会**少报**枚举——见 #33
 
 ## ⚪ 8. MTP 投机解码 (MTP speculation)
 
-*（v3 sglang 专属，已归档）*
+*（v3/v4 时代的结论，**已被 v5 推翻**）*
 
-- 可启动：`--speculative-algorithm NEXTN` 等参数；模型以 `Qwen4ExpForCausalLMMTP` 加载，accept rate 0.62~0.72
-- **但 decode 无收益**（35.7 vs 无 MTP 36~40 t/s）：CPU 核数是瓶颈
-- v4 上：上游对 qwen4_exp 的 MTP 直接丢弃（下游分支有 +12.2% decode 的报告，未合并）
+- v3：可启动（`--speculative-algorithm NEXTN` 等），模型以 `Qwen4ExpForCausalLMMTP` 加载，accept rate 0.62~0.72，
+  **但 decode 无收益**（35.7 vs 无 MTP 36~40 t/s）：CPU 核数是瓶颈
+- v4：上游对 qwen4_exp 的 MTP 直接丢弃（下游分支有 +12.2% decode 的报告，未合并）
+- **v5：MTP 是当真用的**——`--spec 4`，且**必须显式加 `--batch-mtp`**，不加则批处理静默退化（见 #31）
 
 ## 🟢 9. ModelScope revision (ModelScope revision)
 
@@ -88,7 +93,9 @@ TomPython 项目记录的 HF revision（`7b7192...`）在 ModelScope **不存在
 
 ## 🟢 12. pgrep 自匹配陷阱 (pgrep self-match trap)
 
-`pgrep -f '<引擎进程串>'` 会匹配命令行含该字符串的 shell 自身（自杀 → exit 144）。用 `ps aux | grep '[f]t-venv/bin/ft serve'`。
+`pgrep -f '<引擎进程串>'` 会匹配命令行含该字符串的 shell 自身（自杀 → exit 144）。`pkill -f` 同理。
+稳妥写法：`ps -eo pid,args | grep '[f]t-venv/bin/ft serve'` 拿真实 PID 再 `kill`。
+🔵 **v5 没这个问题**：引擎二进制名就是 `strata`，`pgrep -x strata` 精确匹配不会自匹配（见 #36）。
 
 ## ⚪ 13. PLE 表 GPU 瞬态分配 OOM (Upstream PLE transient GPU alloc)
 
@@ -98,12 +105,17 @@ TomPython 项目记录的 HF revision（`7b7192...`）在 ModelScope **不存在
 且该 GPU 占位随后即被 `del`，**纯浪费**。修复：`patches/02_ple_cpu_alloc.patch`。
 （上游已用 meta device 方案在 PR #39928 修复，但晚于 v0.5.20。）
 
-## 🟢 14. 锁页内存与 memlock 限制 (memlock)
+## 🟡 14. 锁页内存与 memlock 限制 (memlock)
 
-锁页内存分配需要放开 `ulimit -l`（系统默认常仅 8MB），启动脚本已内置 `ulimit -l unlimited`（因此需要 root——脚本自动 sudo 提权）。
+锁页内存分配需要放开 `ulimit -l`（系统默认常仅 8MB）。v4 启动脚本内置了 `ulimit -l unlimited` + 自动 sudo 提权。
 
-> **v4 的原因与 v3 不同**：v3 是 PLE 表需 47.7GiB 锁页内存；
-> **v4 下 PLE 走磁盘后端**，`ulimit -l` 真正服务的是**专家 host banks 的 mlock 常驻**。
+> ⚠️ **但 2026-10-02 实测：这两项在本机都不是必需的。** 非 root 启动成功 3 次，
+> 运行中 `VmLck: 0 kB`——offload 走 PINNED，mlock 只服务 CPU-executor 路径，本栈用不到。
+> ⇒ 脚本里那两行属**保守默认**，不要据此宣称"启动必须 root"。
+>
+> v3 与 v4 的原因不同：v3 是 PLE 表真需 47.7GiB 锁页内存；
+> v4 下 PLE 走磁盘后端，`ulimit -l` 名义上服务专家 host banks 的 mlock 常驻，但实测未生效也不影响。
+> **v5（Strata）完全不涉及这套。**
 
 ## ⚪ 15. tilelang 0.1.12 编译不兼容 (tilelang version)
 
@@ -138,6 +150,7 @@ v0.5.20 把 `get_global_server_args()` 改为**硬报错**。lk_moe 集成补丁
 `os.chdir(父进程 cwd)`，降权到普通用户的 worker 无法进入 `/root` → 初始化即崩：
 `PermissionError: [Errno 13] Permission denied: '/root'`。
 **修复**：启动脚本开头 `cd` 到公共目录（v3/v4 脚本均已内置）。
+🔵 **v5**：Strata 的 `serve/server.py` 同理——启动器应先 `cd` 到源码目录再起。
 
 ## ⚪ 20. 构建产物形制（v0.5.20 自建 wheel）
 

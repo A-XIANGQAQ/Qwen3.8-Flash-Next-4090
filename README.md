@@ -22,7 +22,7 @@
 | [TomPython/Qwen-3.8-Flash-Next](https://github.com/TomPython/Qwen-3.8-Flash-Next) | 双 RTX 4090 24GB + 1TiB | Docker 三层镜像 | 双卡专用 |
 | **[Niko1221/Strata](https://github.com/Niko1221/Strata)** | 上游只发 **Windows** 二进制，未见单卡 4090 + 本模型的组合记录 | 自有引擎 + MoE 专家 offload + MTP | 需 Linux 自建与参数（[见 v5 路线](docs/STRATA.md)） |
 | **[FlashML-org/FreeToken](https://github.com/FlashML-org/FreeToken)** | 上游未给出本模型的单卡 4090 组合 | MoE offload 混合推理（CPU 算 experts） | 需本项目补丁与参数（见下） |
-| **本项目** | **单 RTX 4090 48GB** | **v5 = Strata**（自带 offload，仅需 [patch 07](patches/07_strata_esp_family_whitelist.patch) 放行 ESP）；v4 = FreeToken + [三个本地补丁](patches/)（保留作回滚） | ✅ |
+| **本项目** | **单 RTX 4090 48GB** | **v5 = Strata**（自带 offload，仅需 [patch 07](patches/07_strata_esp_family_whitelist.patch) 放行 ESP）；v4 = FreeToken + [三个本地补丁](patches/)（即 `04–06`，保留作回滚） | ✅ |
 
 要点：**111 GB 4-bit 权重驻内存（CPU 计算 experts）+ GPU 算 attention/PLE/常驻层**——让单卡 48GB 显存跑 176B 模型（6B active）。
 v5 与 v4 跑的是**同一基座模型**（Qwen3.8-Flash-Next），差别在**引擎 + 权重格式**：
@@ -55,7 +55,7 @@ v5 = GGUF `UD-Q4_K_XL` + Strata，v4 = NVFP4 + FreeToken。两边**位宽都是 
 | v1（原始，最省事） | Lsglang 1.4.13（guqiong96 release `lsglang-v1.4.12` 内）+ lk_moe 2.4.0 |
 
 **v4 完整保留为回滚目标**（环境、脚本、补丁、模型全部未动），一条命令切回：
-`bash local-tools/start_freetoken_noroot.sh`。
+`bash scripts/start_freetoken.sh`。
 三条更早的历史路线脚本与补丁也全部保留（`scripts/start_lsglang*.sh`、`scripts/build_upstream_flashnext.sh`、
 `scripts/install.sh`、`patches/01-03`），仍可复现；各自验证数据见 [升级文档](docs/UPGRADE.md)。
 
@@ -72,7 +72,7 @@ v5 = GGUF `UD-Q4_K_XL` + Strata，v4 = NVFP4 + FreeToken。两边**位宽都是 
 
 ### v5（Strata） vs v4（FreeToken）—— 2026-10-13，短上下文
 
-同一个模型（Qwen3.8-Flash-Next）、同一 prompt（2336 token）、同一服务入口：
+同一个模型（Qwen3.8-Flash-Next）、同一 prompt（2336 token）、同一服务入口、客户端计时：
 
 | 指标 | v4（FreeToken 0.1.3） | **v5（Strata 0.1.43.1）** |
 |---|---:|---:|
@@ -90,8 +90,12 @@ v5 = GGUF `UD-Q4_K_XL` + Strata，v4 = NVFP4 + FreeToken。两边**位宽都是 
 > llama.cpp 那套 `n_ctx ÷ N`；两个数字都按"聚合 = 总 token ÷ 墙钟"计，跨引擎可比。
 > ⚠️ **只有短上下文数据**。v5 的长上下文（128K/256K）**未实测** —— 配置与显存账支持 4×256K，但没跑过。
 
+**取舍（v5 vs v4）**：v5 单流快一倍、首字快 14 倍，1–2 路场景全面占优；代价是**高并发扩展性弱**
+（1→4 聚合只涨 1.16×，每路 36.9 vs v4 的 45.8 t/s）——**8 路以上密集并发仍是 v4 的地盘**，但本站未实测。
+两条路线的脚本都在仓库里，可双向回滚（见 [升级文档 §8](docs/UPGRADE.md)）。
+
 <details>
-<summary>v4 vs v3 对照（2026-09-24，历史）</summary>
+<summary>更早的 v4 vs v3 对照（2026-09-24，历史）</summary>
 
 | 指标 | **v4（FreeToken 0.1.3）** | v3（sglang v0.5.20） |
 |---|---|---|
@@ -102,12 +106,12 @@ v5 = GGUF `UD-Q4_K_XL` + Strata，v4 = NVFP4 + FreeToken。两边**位宽都是 
 | Anthropic `/v1/messages` | ✅ 原生 | ❌ |
 | 上下文 / 显存 | 256K / 44–46GB | 256K / 41.7GB |
 
-</details>
-
-**取舍**：v4 在长上下文 decode（+50%）、超长 prefill（+22%）、加载（8×）和 Anthropic 协议支持上明显更好；
-代价是 8K prefill、短请求延迟（**3.4s 固定开销** vs 0.42s）和高并发扩展性不如 v3，
+**那一轮的取舍**：v4 在长上下文 decode（+50%）、超长 prefill（+22%）、加载（8×）和 Anthropic 协议支持上
+明显更好；代价是 8K prefill、短请求延迟（3.4s 固定开销 vs 0.42s）和高并发扩展性不如 v3，
 多路并行时仍会被长 prefill 打断吐字（打上 #484 补丁后最长停顿 17.7s → 7.5s）。
-两条路线的脚本与补丁都在仓库里，可双向回滚。
+⚠️ **这是 v4 与 v3 的比较，与当前 v5 无关**——v5 的取舍见上方正文。
+
+</details>
 
 > 完整数据、测量条件、口径说明（并发有「聚合/每流」两种口径，跨引擎不可直接比）、
 > 单变量调优结论，以及第三方工具 [llm_speedtest](https://github.com/gengchaogit/llm_speedtest)
@@ -202,4 +206,6 @@ bash scripts/start_freetoken.sh
 
 ## License
 
-Apache-2.0（补丁逻辑受上游 FlashAttention / FreeToken 许可证约束；原创脚本与文档 Apache-2.0）。
+Apache-2.0（原创脚本与文档部分）。补丁与代码片段随其来源：`patches/01–03` 受上游 FlashAttention / sglang 许可证约束，
+`patches/04–06` 受 FreeToken 许可证约束，`patches/07` 改的是 Strata 的 `setup.py`，随
+[Niko1221/Strata](https://github.com/Niko1221/Strata) 的许可证。

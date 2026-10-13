@@ -28,15 +28,16 @@ tail -f /tmp/ft.log
 ## 1b. 引擎互切 (Switch / Rollback)
 
 ```bash
-S=/home/user/local-tools/switch_engine.sh
+# switch_engine.sh 是本站自建的一键互切脚本，**不在本仓库**（流程见下方，可自行实现）
+S=switch_engine.sh
 
 bash $S B --status          # 只看当前是谁（A=v4 FreeToken, B=v5 Strata）
 bash $S B                   # 切到 v5
 bash $S A                   # 切回 v4（回滚）
 
 # 或直接手工
-bash local-tools/start_freetoken_noroot.sh   # 回滚 v4
-bash strata/stop_strata.sh                                  # 停 v5（含显存释放判据）
+bash scripts/start_freetoken.sh   # 回滚 v4
+bash stop_strata.sh               # 停 v5（含显存释放判据）
 ```
 
 `switch_engine.sh` 的流程：停当前 → **轮询等 `nvidia-smi` used <1000 MiB** → 起目标 →
@@ -68,10 +69,11 @@ watch -n 1 nvidia-smi
 
 ```bash
 # ── v5（Strata）──────────────────────────────
-bash strata/stop_strata.sh      # 停服务端 + 引擎，并【等显存降到 <1000 MiB】才算成功
+bash stop_strata.sh             # 停服务端 + 引擎，并【等显存降到 <1000 MiB】才算成功
 
 # ── v4（FreeToken）───────────────────────────
-pkill -f "ft-venv/bin/ft serve"
+ps -eo pid,args | grep '[f]t-venv/bin/ft serve'   # 先确认真实 PID（见下方自匹配警告）
+kill <pid>
 bash scripts/start_freetoken.sh        # 重启（约 40 秒）
 ```
 
@@ -81,9 +83,11 @@ bash scripts/start_freetoken.sh        # 重启（约 40 秒）
 > （2026-10-13 漏这步 → nginx 502 五分钟。）
 > 一条命令自查：`nvidia-smi --query-gpu=memory.used --format=csv,noheader`
 
-⚠️ 不要用 `pgrep -f` 取 PID 后再 kill——该模式可能匹配到命令行含此字符串的 shell 自身。
-改用 `ps aux | grep '[f]t-venv/bin/ft serve'` 确认；Strata 的引擎二进制名就是 `strata`，
-可以安全用 `pgrep -x strata`（精确匹配，不会自匹配）。
+⚠️ **`pkill -f` / `pgrep -f` 都会把「命令行里含该字符串的自己的 shell」一并匹配**——实测踩过
+（`pkill -f "ft-venv/bin/ft serve"` 会连发起它的 shell 一起杀掉）。两种稳妥写法：
+
+- `ps -eo pid,args | grep '[f]t-venv/bin/ft serve'` 拿到真实 PID 再 `kill`
+- 用引擎二进制的**精确名**匹配：Strata 就是 `pgrep -x strata`（不会自匹配）
 
 ⚠️ **改参数一律走「停 + 重启」**：40 秒就能起回来，而 `ft ctl cache rebuild` 热调在上游有把服务器
 wedge 住的记录（#526，重建 OOM 后无法回滚）。
