@@ -198,7 +198,10 @@ cp /path/to/froggeric/chat_template.jinja "$PACK/chat_template.jinja"
 **v5（当前，Strata）**——约 **50 秒**就绪，就绪判据是日志行 `ready:`：
 
 ```bash
-setsid bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
+#    ⛔ 必须在**你自己的终端**里跑：从 agent/CI 的工具调用里起，进程会落在 systemd
+#       临时单元 dsh-subprocess-*.scope 里（setsid 也脱不出 cgroup），重启 dsh-web
+#       时被整组 SIGTERM。判据与细节见 docs/OPERATIONS.md §1
+nohup  bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 tail -f strata/strata-prod.log
 # 期望：ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions,
 #                                        Anthropic: /v1/messages, context 262144 tokens)

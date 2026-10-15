@@ -61,7 +61,10 @@ cp froggeric-v22.5/chat_template.jinja \
    Strata-data/packs/<模型>/tokenizer/chat_template.jinja
 
 # 4. 启动 + 核验
-setsid bash run_strata.sh > strata-prod.log 2>&1 &
+#    ⛔ 必须在**你自己的终端**里跑：从 agent/CI 的工具调用里起，进程会落在 systemd
+#       临时单元 dsh-subprocess-*.scope 里（setsid 也脱不出 cgroup），重启 dsh-web
+#       时被整组 SIGTERM。判据与细节见 docs/OPERATIONS.md §1
+nohup  bash run_strata.sh > strata-prod.log 2>&1 &
 ```
 
 ### 0.4 本次踩到的坑

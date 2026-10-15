@@ -153,7 +153,10 @@ STRATA_UV=1 ./setup.sh --setup --family unsloth --model UD-Q4_K_XL \
 # 76 核上约 1 分钟编完，产出 engine/strata（59 MB）
 
 # 4. 启动（chat 模板守卫挂在启动器上，见下）
-setsid bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
+#    ⛔ 必须在**你自己的终端**里跑：从 agent/CI 的工具调用里起，进程会落在 systemd
+#       临时单元 dsh-subprocess-*.scope 里（setsid 也脱不出 cgroup），重启 dsh-web
+#       时被整组 SIGTERM。判据与细节见 docs/OPERATIONS.md §1
+nohup  bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 # 就绪标志：日志行 "ready:"（约 50 秒）
 ```
 
