@@ -282,7 +282,7 @@ A smaller --prefill, or auto, keeps them all in RAM
 
 | 动作 | 命令 |
 |---|---|
-| 启动（约 50 秒就绪） | `setsid bash run_strata.sh > strata-prod.log 2>&1 &` |
+| 启动（约 50 秒就绪） | `nohup bash run_strata.sh > strata-prod.log 2>&1 &` —— **必须在自己终端里跑**，见 [OPERATIONS §1](OPERATIONS.md)（从 agent 的工具调用里起会被 cgroup 连坐） |
 | 停止（约 10–20 秒 + 等显存） | `bash stop_strata.sh`——轮询 `nvidia-smi` 到 used <1000 MiB 才算停干净 |
 | 引擎互切 | 本站用自建的一键脚本（**不在本仓库**；流程见 [OPERATIONS §1b](OPERATIONS.md)） |
 | 模板守卫 | 挂在启动器上（`ensure_chat_template.sh` 式做法，幂等、fail-open）；v4 的启动器同样挂了 |

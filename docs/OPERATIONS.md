@@ -7,7 +7,18 @@
 
 ```bash
 # ── v5（当前，Strata）──────────────────────────────
-setsid bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
+# ⛔ **必须在你自己的终端里跑**。绝不要从 agent / CI 的工具调用里用 `setsid ... &` 起。
+#    2026-10-15 09:40 实测踩到：从 agent 的 bash 工具里起的进程，**仍落在 systemd 临时单元
+#    `dsh-subprocess-*.scope` 的 cgroup 里**——`setsid` 只脱离终端/会话，**脱不出 cgroup**。
+#    重启 dsh-web 时该 scope 被回收，server + strata + strata-vision **整组**被 SIGTERM/SIGKILL。
+#    症状极具误导性：日志只留 `stopping (Ctrl+C again to end the engine at once)`、
+#    **没有任何 traceback / CUDA / OOM** —— 那不是崩溃，是被信号停的。
+#    判据（systemd 侧才有）：
+#      journalctl -b 0 | grep -E 'dsh-subprocess.*(SIGTERM|SIGKILL)'
+#
+#    从自己终端起则落在登录会话（KillUserProcesses 默认不杀 + Linger=yes），**关掉终端也不会死**。
+nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
+# 桌面版（含「等显存 <1000 MiB」+ 关 GUI）：bash ~/桌面/一些启动脚本/start_strata_kill_gui.sh
 # 就绪标志：日志行 "ready:"（约 50 秒）
 #   ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions, Anthropic: /v1/messages, context 262144 tokens)
 
