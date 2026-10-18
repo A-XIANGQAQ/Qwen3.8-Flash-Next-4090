@@ -466,6 +466,38 @@ wc -c <pack>/tokenizer/chat_template.jinja    # 该模型的应是 ~221835，不
 
 ---
 
+## 🔴 47. 用 `systemd-run` 跑"起完就退出"的启动脚本：模型被单元回收连带杀掉
+
+`start_strata_kill_gui.sh` 的结构是 **起服务 → 等 ready → 打印完成 → 退出**。
+把它直接当 `systemd-run` 的主进程时，脚本一退出，systemd 认为单元完成，**回收整个 cgroup**，
+刚起来的 server/engine 被一起 SIGTERM：
+
+```
+14:15:48 ready: http://127.0.0.1:8000/v1 ...
+14:15:54 strata-prod.service: Consumed 40.9s CPU time        <- 单元退出
+[strata] stopping (Ctrl+C again to end the engine at once) ... <- 模型被停
+```
+
+**修法**：给单元加 `RemainAfterExit=yes`，让单元在"脚本已退出"之后仍保持 active，cgroup 不被回收：
+
+```bash
+systemd-run --user --unit=strata-prod --collect \
+  --property=RemainAfterExit=yes \
+  --setenv=STRATA_NO_SUDO=1 \
+  --working-directory=~/dsh_workspace/strata/Strata \
+  bash "/path/to/start_strata_kill_gui.sh"
+# 之后：systemctl --user is-active strata-prod  -> active (exited)
+#       停止照样用 systemctl --user stop strata-prod（会把里面的 server/engine 一起收掉）
+```
+
+判据：`systemctl --user show strata-prod -p SubState --value` 应为 `exited` 而 `is-active` 仍为 `active`；
+脚本退出 30 秒后 `curl :8000/v1/models` 仍 200。
+
+`STRATA_NO_SUDO=1` 是脚本 2026-10-18 新增的无提权分支（当前用户已是目标用户、lightdm 已关时用）；
+你自己终端里直接跑仍然走 sudo 路径，行为不变。
+
+---
+
 ## 立即停止条件 (Stop conditions)
 
 host OOM / swap 持续增长 / NVIDIA Xid / 不可恢复 kernel fault / 同失败连续两次无新证据。
