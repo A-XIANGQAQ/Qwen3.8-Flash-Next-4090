@@ -19,10 +19,22 @@
 #    从自己终端起则落在登录会话（KillUserProcesses 默认不杀 + Linger=yes），**关掉终端也不会死**。
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 # 桌面版（含「等显存 <1000 MiB」+ 关 GUI）：bash ~/桌面/一些启动脚本/start_strata_kill_gui.sh
-# 就绪标志：日志行 "ready:"（约 50 秒）
+# 就绪标志：日志行 "ready:"（约 40–55 秒）
 #   ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions, Anthropic: /v1/messages, context 262144 tokens)
 
+# ── 推荐：一次性 systemd 用户单元（2026-10-18 起本站生产就用这个）─────────
+# 比 nohup 强在 cgroup：单元的 cgroup 是 dsh-web.service 的**兄弟**，dsh-web 重启不会连坐；
+# 又不是开机自启（transient、无 [Install]、--collect 退出即消失，重启后照样要手动拉）。
+systemd-run --user --unit=strata-prod --collect \
+  --working-directory=~/dsh_workspace/strata/Strata \
+  bash ~/dsh_workspace/strata/run_strata.sh
+#   systemctl --user status strata-prod      # 状态
+#   journalctl --user -u strata-prod -f      # 日志
+#   systemctl --user stop strata-prod        # 停（要换桌面脚本启动前必须先停，否则 8000 被占）
+
 # ⚠️ 不要用 ./setup.sh 起服务 —— 它无参数时会自己拉起模型并【绕过 chat 模板守卫】，模板会退回原装
+# ⚠️ **当前生产模型是 DavidAU abliterated IQ3_S**，它自带 22 万字符模板，
+#    启动器里那条 froggeric 模板守卫已被移除（旧版备份 run_strata.sh.bak-undq4-20261018）。见 TROUBLESHOOTING #45
 # ⚠️ 必须先确认显存已空（见 §3），否则 cudaMalloc OOM
 
 # ── v4（回滚，FreeToken）────────────────────────────

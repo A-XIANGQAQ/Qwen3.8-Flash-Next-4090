@@ -176,15 +176,17 @@ def run_vision(arm):
 
 
 def main():
-    global BASE
+    global BASE, MODEL
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", required=True)
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--contexts", default="1024,32768,102400")
     ap.add_argument("--skip-vision", action="store_true")
+    ap.add_argument("--model", default=MODEL, help="the served model id (A/B arms differ)")
     ap.add_argument("--skip-batch", action="store_true")
     a = ap.parse_args()
     BASE = f"http://127.0.0.1:{a.port}"
+    MODEL = a.model
     sizes = [int(x) for x in a.contexts.split(",") if x.strip()]
 
     with urllib.request.urlopen(BASE + "/v1/models", timeout=30) as r:

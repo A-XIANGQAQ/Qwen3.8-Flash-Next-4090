@@ -31,19 +31,22 @@ v5 = GGUF `UD-Q4_K_XL` + Strata，v4 = NVFP4 + FreeToken。两边**位宽都是 
 
 ## 已验证组合 (Verified Stack)
 
-**当前推荐：v5.1 = Strata 0.1.45**（2026-10-18 起；引擎由 0.1.43.1 升级——短上下文 decode +3.4%、
-32K TTFT −26%、100K TTFT −12%，两臂实测见 [升级文档 §0b](docs/UPGRADE.md)）。只需 [patch 07](patches/07_strata_esp_family_whitelist.patch) 放行 ESP，
-**v4 那三个补丁与本路线无关**。切换记录见 [升级文档](docs/UPGRADE.md)，完整路线说明见 [v5 路线文档](docs/STRATA.md)）
+**当前推荐：v5.2 = Strata 0.1.45 + DavidAU abliterated IQ3_S**（2026-10-18 起。引擎先由 0.1.43.1 升到 0.1.45，
+两臂实测见 [升级文档 §0b](docs/UPGRADE.md)；随后**换模型**：UD-Q4_K_XL → DavidAU abliterated IQ3_S，
+实测 decode +10%、1K TTFT −49%、32K/100K decode +34%/+31%、4 路并发 −29% 墙钟、温和拒答 4.55%→0%，
+见 [升级文档 §0c](docs/UPGRADE.md)）。
+**这个模型自带 abliteration，所以不再需要 ESP 控制向量，也不需要 [patch 07](patches/07_strata_esp_family_whitelist.patch)**
+（补丁保留，仅用于回滚或重跑 setup）。**v4 那三个补丁与本路线无关**。）
 
 | 层 | 固定身份 |
 |---|---|
-| 模型 | `unsloth/Qwen3.8-Flash-Next-GGUF` → **UD-Q4_K_XL**（ModelScope，111.33 GB / 4 shards，**4-bit**） |
-| 引擎 | **[Niko1221/Strata](https://github.com/Niko1221/Strata) `0.1.45`**（Linux 自建；CUDA 13.2 / sm89 / `BUILD.json archs:[89]`；产出 `strata` + `strata-vision` + **`libstrata_kq.so`**）——仅需 [patch 07](patches/07_strata_esp_family_whitelist.patch)（ESP 家族白名单） |
+| 模型 | `DavidAU/Qwen3.8-Flash-Next-Abliterated-Uncensored-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF` → **IQ3_S**（HuggingFace，83.86 GB / 2 shards，**3.5 bpw**，本身已破限） |
+| 引擎 | **[Niko1221/Strata](https://github.com/Niko1221/Strata) `0.1.45`**（Linux 自建；CUDA 13.2 / sm89 / `BUILD.json archs:[89]`；产出 `strata` + `strata-vision` + **`libstrata_kq.so`**） |
 | 并发 / 上下文 | `--batch 4` × `--max-context 262144`（每 slot 独立 session） |
 | KV | **`k8v4` + `--kv-resident 32768`**（816 B/cell；KV 流式到宿主内存——4×256K 全放显存会 OOM） |
-| 破限 | **引擎自带 ESP 控制向量**（480 KB，层 4–44，逐请求可关）；强探针关=14/14 拒答、开=0/14 |
-| 图像 | **自带 vision 编码器**（`mmproj-…-BF16.gguf` 0.91 GB，GPU 模式，`tools/vision` 自建）；图像 token 上限 1024，占 ~1.4 GB 显存 |
-| Chat Template | [froggeric v22.5](https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates)（需装进 pack 的 `tokenizer/`；**重装会被覆盖，故挂在启动器上**） |
+| 破限 | **模型自带 abliteration**（原 UD-Q4_K_XL 路线靠引擎 ESP 控制向量；强探针 0/14 拒答，温和 0/22） |
+| 图像 | **自带 vision 编码器**（`mmproj-…-BF16.gguf` 0.91 GB，与 HF 仓库那份逐字节相同，GPU 模式）；图像 token 上限 1024，占 ~1.4 GB 显存 |
+| Chat Template | **模型自带的 221,835 字符模板**（27 推理 + 27 指令模式 + AI Constructs）。⚠️ **不能再套 froggeric 模板**——旧启动器的守卫会覆盖它，生产启动器已去掉该守卫 |
 | GPU | 单 RTX 4090 **48GB** / sm89 / TP1 |
 
 <details>

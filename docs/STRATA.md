@@ -41,7 +41,13 @@
 
 ---
 
-## 2. 模型：为什么是 UD-Q4_K_XL
+## 2. 模型：UD-Q4_K_XL（历史）→ 现在是 DavidAU abliterated IQ3_S
+
+> ⚠️ **2026-10-18 起生产模型是 `DavidAU/Qwen3.8-Flash-Next-Abliterated-Uncensored-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF`（IQ3_S）**，
+> 不是本节讲的 UD-Q4_K_XL。换它的原因、A/B 数字与部署要点见 [UPGRADE.md §0c](UPGRADE.md)：
+> 同机同参数实测 decode +10%、1K TTFT −49%、100K decode +31%、4 路墙钟 −29%、温和拒答 4.55%→0%，
+> 且**自带 abliteration ⇒ 不再需要 ESP 控制向量**。
+> 本节保留为"当初为什么选 UD-Q4_K_XL"的记录，不要删——它是 §0c 的对照基线。
 
 v4 跑的是 **NVFP4**（4-bit）。要公平对比就必须**位宽对齐**，否则质量差异会误导结论。
 按 [Strata docs/MODELS.md](https://github.com/Niko1221/Strata/blob/main/docs/MODELS.md) 选型：
@@ -49,13 +55,14 @@ v4 跑的是 **NVFP4**（4-bit）。要公平对比就必须**位宽对齐**，�
 | 候选 | 下载 | vs 本站 135.2 GB | 位宽 | 破限可用 |
 |---|---:|---:|---|---|
 | **v4 的 NVFP4** | 135.2 GB | — | **4-bit** | ✅（abliterated checkpoint） |
+| **DavidAU abliterated IQ3_S**（2026-10-18 起生产） | **83.86 GB** | **−38.0%** | **3.5 bpw** | ✅（模型自带 abliteration） |
 | UD-IQ4_XS | 93.68 GB | −30.7% | ~3.5-bit（IQ3_S/IQ4_NL 混合） | 需补丁 |
-| **UD-Q4_K_XL** ← 选它 | **111.33 GB** | **−17.6%** | **4-bit** | 需补丁 |
+| **UD-Q4_K_XL**（2026-10-13~18 生产，已删） | **111.33 GB** | **−17.6%** | **4-bit** | 需补丁 |
 | UD-Q5_K_XL | 158.29 GB | +17.1% | 5-bit | 精度高于 v4，不公 |
 | UD-Q6_K_XL | 169.17 GB | +25.1% | 6-bit | 同上 |
 
-**下载走 ModelScope**（`unsloth/Qwen3.8-Flash-Next-GGUF`，4 分片，字节数与 API 逐字节核对）。
-HF 在本机实测仅 234 B/s，不可用。
+**下载**：UD-Q4_K_XL 走 ModelScope（`unsloth/Qwen3.8-Flash-Next-GGUF`，4 分片，字节数与 API 逐字节核对）；
+DavidAU 那份只在 HuggingFace，走 1× 代理 **12 路并行 range**（实测 16 MB/s，6 路只有 9），两片 sha256 与 HF 的 `lfs.oid` 对齐。
 
 ---
 

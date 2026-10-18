@@ -1,11 +1,12 @@
 # 升级记录 (Upgrade Log)
 
-本页记录本项目的引擎演进。当前为 **v5.1（Strata 0.1.45）**，v1–v4（FreeToken / 官方 sglang / Lsglang）全部折叠保留作参考。
+本页记录本项目的引擎演进。当前为 **v5.2（Strata 0.1.45 + DavidAU abliterated IQ3_S）**，v1–v4（FreeToken / 官方 sglang / Lsglang）全部折叠保留作参考。
 
 | 版本 | 时间 | 路线 | 状态 |
 |---|---|---|---|
-| **v5.1（当前）** | **2026-10-18** | **Strata 0.1.45** + 同一套 ESP 破限（[patch 07](../patches/07_strata_esp_family_whitelist.patch) 已对位到 0.1.45 的 `setup.py:6643`） | ✅ 已上线（见 §0b） |
-| v5.0 | 2026-10-13 | **Strata 0.1.43.1** + 自带 ESP 破限 | 已被 v5.1 取代；二进制留档，可回滚（见 §0b.6、§0.2） |
+| **v5.2（当前）** | **2026-10-18** | **Strata 0.1.45 + DavidAU abliterated IQ3_S**（模型自带破限，**不再用 ESP**；4-bit→3.5bpw，快 10~52%，拒答 4.55%→0%） | ✅ 已上线（见 §0c） |
+| v5.1 | 2026-10-18 | **Strata 0.1.45** + UD-Q4_K_XL + ESP 破限（[patch 07](../patches/07_strata_esp_family_whitelist.patch) 已对位到 0.1.45 的 `setup.py:6643`） | 被 v5.2 取代；UD-Q4_K_XL 权重已删（回滚需重下 104 GB），见 §0c.4 |
+| v5.0 | 2026-10-13 | **Strata 0.1.43.1** + 自带 ESP 破限 | 已被 v5.1 取代；引擎二进制留档，可回滚（见 §0b.6、§0.2） |
 | v4 | 2026-09-24 | **FreeToken 0.1.3** + 三个本地补丁 + abliterated NVFP4 | 回滚目标（见 §1，命令见 §8） |
 | v3 | 2026-09-23 | 官方 sglang tag **v0.5.20** + lk_moe 补丁重放 + PLE 补丁 | 历史（见 §5） |
 | v2 | 2026-09-14 | Lsglang `0.5.19-lkmoe` 分支合并 PR #37500 + PLE 补丁 | 历史（见 §6） |
@@ -196,6 +197,69 @@ bash "/path/to/start_strata_kill_gui.sh"    # 必须在自己的终端里跑，�
 ```
 
 配置**不用改**：本次没有往生产 config 里加任何 `env` 项。
+
+---
+
+## 0c. v5.2：换模型 —— UD-Q4_K_XL → DavidAU abliterated IQ3_S（2026-10-18）
+
+> 这一节**不推翻 §0b**：引擎还是 0.1.45，参数几乎全同，**换的是权重**。
+> 目标模型：[DavidAU/Qwen3.8-Flash-Next-Abliterated-Uncensored-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF](https://huggingface.co/DavidAU/Qwen3.8-Flash-Next-Abliterated-Uncensored-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF)
+> （IQ3_S，84 GB 两片；**本身已 abliterate ⇒ 不再需要 ESP 控制向量**）。
+
+### 0c.1 为什么值得换
+
+1. **它自带的 abliteration 替代了我们的 ESP 补丁**：不需要 `--control-vector-*`，也就不再依赖
+   [patch 07](../patches/07_strata_esp_family_whitelist.patch) 的那道家族门（补丁仍保留，仅用于回滚/重跑 setup）。
+2. **3.50 bpw 但质量几乎不掉**：作者/ISTA 的实测（对 BF16 基线）IQ3_S `AIME25 100.00 / GPQA-D 92.93 /
+   LCB v6 86.86 / task avg 93.26`，BF16 是 93.12。
+3. **作者本人就是指着 Strata 推荐跑这个模型的**（模型卡 SUPER CHARGER 段直接链到 Niko1221/Strata）。
+4. 模型小 27 GB（84 vs 111）⇒ 更多专家进显存、更少读盘、常驻内存更省。
+
+### 0c.2 A/B 实测（同机、同参数、各自全新启动；停服约 35 分钟）
+
+| 指标 | UD-Q4_K_XL + ESP | **DavidAU IQ3_S** | Δ |
+|---|---:|---:|---|
+| decode（短上下文 6 次中位） | 144.5 t/s | **159.5** | +10.4% |
+| TTFT 短 / 1K / 32K / 100K | 0.455 / 1.58 / 6.99 / 21.76 s | **0.407 / 0.81 / 6.14 / 19.01 s** | −11% / **−49%** / −12% / −13% |
+| decode 1K / 32K / 100K | 103.2 / 111.4 / 111.4 t/s | **156.6 / 148.9 / 145.5** | +52% / +34% / +31% |
+| 4 路并发墙钟 / 合计 | 7.04 s / 76.9 t/s | **4.98 s / 103.3 t/s** | −29% / +34% |
+| 温和拒答 22 条 | 1/22 = 4.55% | **0/22 = 0%** | 更好 |
+| 强探针 14 条 | 0/14 | 0/14 | 平 |
+| 数学（难 8 / 易 15） | 8/8 · 15/15 | 8/8 · 15/15* | 平 |
+| 指令 6 / 代码 9 / 32K 找针 2 | 6/6 · 9/9 · 2/2 | 6/6 · 9/9 · 2/2 | 平 |
+| 视觉三色条 | 3/3 | 3/3 | 平 |
+| 专家缓存 / 常驻 RAM | 11054 槽 / 52.10 GiB | **17422 槽 / 26.36 GiB** | 更好 / 更省 |
+| 启动空闲显存 / WARNING | 2161 MiB / 0 | 2231 MiB / 0 | 平 |
+
+\* 易数学那条唯一的"错"是 `6.00` 与 `6` 的字符串比较，答案本身正确 ⇒ 实际 15/15。
+MTP 复用基座草稿头仍然有效：`drafts accepted 79 of 94`。
+
+### 0c.3 部署要点（四个都会让服务起不来）
+
+1. **`--ple-gguf` 必须指向 shard2**。这个模型的 28.80 GB PLE 表（`per_layer_token_embd.weight`，
+   shape `[160, 320001536]`）**独占第二片**；shard1 里 1223 个张量中没有它。写错就是启动失败。
+2. **建 pack 只调工具，不跑 setup**：
+   `.venv/bin/python tools/iq_pack.py --gguf <shard1> --out <pack> --compat-bf16`
+   实测 `compat-bf16: 0 tensors, 0.00 GiB` —— 这个 quant 的小型投影本来就存成 BF16/F16，
+   **一个张量都不用转换**（比 Unsloth 的 UD-Q4_K_XL 干净）。
+3. **GGUF 里没有 MTP 张量**（作者另有 `…-MTP-GGUF` 仓库）。按 [Strata docs/ORCA.md](https://github.com/Niko1221/Strata/blob/v0.1.45/docs/ORCA.md) 的做法复用
+   基座 `mtp/rt` 草稿头，由目标模型自己校验草稿；`drafts accepted` 正常。
+4. **绝不能跑 chat 模板守卫**。模型自带 221,835 字符的模板（27 推理 + 27 指令模式 + AI Constructs），
+   `iq_pack.py` 已从 GGUF 原样导出到 `pack/tokenizer/chat_template.jinja`；
+   旧的 `run_strata.sh` 会用 froggeric 模板覆盖它，等于把这个模型的核心能力删掉。
+   ⇒ 生产启动器已去掉守卫，备份 `run_strata.sh.bak-undq4-20261018`。
+
+另：服务端**不校验 `model` 字段**，客户端继续用老的 id 也能 200（实测 `PROD_SWITCHED`），**不需要改客户端**。
+
+### 0c.4 决定与清理
+
+按"哪个好留哪个"：**留 DavidAU，删 UD-Q4_K_XL**（用户确认）。
+
+已删除：`models/UD-Q4_K_XL/` 104 GB、`Strata-data/packs/unsloth-ud-q4_k_xl/` 1.4 GB、
+10-13 的两个残片 `models/IQ3_S/` 3.3 GB 与 `models/UD-IQ4_XS/` 828 MB。
+**磁盘 340 GB → 449 GB 可用**。旧生产配置移到 `backups/strata-unsloth-ud-q4_k_xl.json.disabled`（防止误启动）。
+
+⚠️ 代价：回滚到 UD-Q4_K_XL 需要重新下载 104 GB，没有本地副本。
 
 ---
 

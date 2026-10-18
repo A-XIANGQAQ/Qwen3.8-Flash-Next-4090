@@ -407,6 +407,65 @@ ps -eo pid=,comm=,args= | awk -v me="$$" '$1 != me && $2 ~ /^python/ && /[s]erve
 
 ---
 
+## 🔴 43. 第三方 GGUF 起不来：`--ple-gguf` 指错了分片
+
+`iq_pack.py` 把 28.8 GB 的 PLE 表（`per_layer_token_embd.weight`）**留在 GGUF 里**
+（`NOT_IN_PACK = {"per_layer_token_embd.weight"}`），引擎靠 `--ple-gguf` 去那个文件里读。
+
+**它不一定在 shard1。** DavidAU 那份 IQ3_S 里：
+
+| 分片 | 大小 | 张量数 | PLE |
+|---|---:|---:|---|
+| `-00001-of-00002` | 55.06 GB | 1223 | ❌ 没有 |
+| `-00002-of-00002` | 28.80 GB | **1** | ✅ `shape [160, 320001536]` |
+
+判据（只读索引，不读权重，几秒）：
+
+```bash
+.venv/bin/python dsh_workspace/strata/find_ple_shard.py <shard1> <shard2>
+```
+
+写错分片的症状是启动就失败（不是慢，也不是 OOM）。⇒ `--ple-gguf` 指到含 PLE 的那一片。
+
+## 🔴 44. 给第三方/微调 GGUF 建 pack：只调 `iq_pack.py`，别跑 setup
+
+```bash
+.venv/bin/python tools/iq_pack.py --gguf <shard1> --out <pack> --compat-bf16
+```
+
+- **必须等两片都下完**（缺片直接报错，不会悄悄跳过）。
+- `--compat-bf16` 的转换量取决于这个 quant 自己怎么存小投影：DavidAU 的 IQ3_S 实测
+  **`compat-bf16: 0 tensors, 0.00 GiB`**（本来就是 BF16/F16）；Unsloth 的 UD-Q4_K_XL 则需要转。
+  **0 个张量意味着这一层没有额外量化损失**，是好消息不是漏做。
+- 打包会从 GGUF 导出**它自己的 tokenizer 与 chat 模板**到 `<pack>/tokenizer/`。
+- 别用 setup 主流程：`carry_over()` 会丢手调参数，且 setup 的 SHA-256 校验在大分片上有 bug（#2902）。
+
+## 🔴 45. 带自带模板的模型被套上通用模板（能力被删掉）
+
+我们的旧 `run_strata.sh` 每次启动都会把 froggeric 修复版模板拷进"第一个 pack 的 tokenizer"。
+对 UD-Q4_K_XL 是必要的（原装模板有 bug）；但对 **DavidAU 这类自带 22 万字符模板、27 推理 + 27 指令模式
++ AI Constructs 的模型，这等于把它的核心能力删掉**，而且**没有任何报错**——只是"变笨了"。
+
+判据：
+
+```bash
+wc -c <pack>/tokenizer/chat_template.jinja    # 该模型的应是 ~221835，不是 froggeric 的那份
+```
+
+修法：**给这类模型用不带守卫的启动器**（本站 `run_strata.sh` 已去掉守卫，
+备份在 `run_strata.sh.bak-undq4-20261018`，回滚 UD-Q4_K_XL 时要一起恢复）。
+
+## 🔵 46. 并行下载：完成判据是 `.done.json`，不是文件大小
+
+预分配（`truncate`）过的文件**缺块也显示满大小**，用 `stat`/`ls` 判断"下完了"会直接拿坏文件去打包。
+
+- 判据：`<file>.done.json` 存在（它是 sha256 校验通过后才写出来的）
+- 未完成时是 `<file>.progress.json`（记录已完成块，可续传）
+- 实测吞吐（HF + 1× 代理）：**6 路 ≈ 9 MB/s，12 路 ≈ 16 MB/s**；不是线路封顶就别急着降并发
+- SSL 偶发 `UNEXPECTED_EOF_WHILE_READING` 会让个别块失败；有 `.progress.json` 就只是续传，不是重下
+
+---
+
 ## 立即停止条件 (Stop conditions)
 
 host OOM / swap 持续增长 / NVIDIA Xid / 不可恢复 kernel fault / 同失败连续两次无新证据。
