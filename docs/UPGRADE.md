@@ -7,10 +7,10 @@
 | **v5.2（当前）** | **2026-10-18** | **Strata 0.1.45 + DavidAU abliterated IQ3_S**（模型自带破限，**不再用 ESP**；4-bit→3.5bpw，快 10~52%，拒答 4.55%→0%） | ✅ 已上线（见 §0c） |
 | v5.1 | 2026-10-18 | **Strata 0.1.45** + UD-Q4_K_XL + ESP 破限（[patch 07](../patches/07_strata_esp_family_whitelist.patch) 已对位到 0.1.45 的 `setup.py:6643`） | 被 v5.2 取代；UD-Q4_K_XL 权重已删（回滚需重下 104 GB），见 §0c.4 |
 | v5.0 | 2026-10-13 | **Strata 0.1.43.1** + 自带 ESP 破限 | 已被 v5.1 取代；引擎二进制留档，可回滚（见 §0b.6、§0.2） |
-| v4 | 2026-09-24 | **FreeToken 0.1.3** + 三个本地补丁 + abliterated NVFP4 | 回滚目标（见 §1，命令见 §8） |
-| v3 | 2026-09-23 | 官方 sglang tag **v0.5.20** + lk_moe 补丁重放 + PLE 补丁 | 历史（见 §5） |
-| v2 | 2026-09-14 | Lsglang `0.5.19-lkmoe` 分支合并 PR #37500 + PLE 补丁 | 历史（见 §6） |
-| v1 | 原始 | Lsglang 1.4.13 + lk_moe 2.4.0 | 历史（见 §6） |
+| v4 | 2026-09-24 | **FreeToken 0.1.3** + 三个本地补丁 + abliterated NVFP4 | ⛔ 运行时与权重已于 2026-10-18 删除，**不可回滚**（见 §1 历史记录） |
+| v3 | 2026-09-23 | 官方 sglang tag **v0.5.20** + lk_moe 补丁重放 + PLE 补丁 | ⛔ 运行时已删（2026-10-18）；历史（见 §5） |
+| v2 | 2026-09-14 | Lsglang `0.5.19-lkmoe` 分支合并 PR #37500 + PLE 补丁 | ⛔ 运行时已删；历史（见 §6） |
+| v1 | 原始 | Lsglang 1.4.13 + lk_moe 2.4.0 | ⛔ 运行时已删；历史（见 §6） |
 
 > 本文件名原为 `UPGRADE_UPSTREAM_FLASHNEXT.md`（标题写死 sglang 路线）。切到 v4 后改名为 `UPGRADE.md`，
 > 旧链接会 404，请更新。
@@ -263,7 +263,7 @@ MTP 复用基座草稿头仍然有效：`drafts accepted 79 of 94`。
 
 ---
 
-## 1. 为什么切到 FreeToken（v4，2026-09-24，回滚目标）
+## 1. 为什么切到 FreeToken（v4，2026-09-24，**已于 2026-10-18 退役**）
 
 v3（sglang + lk_moe）的瓶颈是**架构性**的：experts 在 CPU 上算，decode 速度受 CPU 算力与单步同步延迟限制，
 长上下文 decode 卡在 ~42 t/s，加载要 ~5.5 分钟。FreeToken 恰好是为「权重驻内存 + CPU 算 experts」

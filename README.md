@@ -50,7 +50,7 @@ v5 = GGUF `UD-Q4_K_XL` + Strata，v4 = NVFP4 + FreeToken。两边**位宽都是 
 | GPU | 单 RTX 4090 **48GB** / sm89 / TP1 |
 
 <details>
-<summary>旧组合（历史）：v4 = FreeToken 0.1.3 + 三个本地补丁；v3 = 官方 sglang v0.5.20；v2 = Lsglang 0.5.19-lkmoe + PR #37500；v1 = Lsglang 1.4.13</summary>
+<summary>旧组合（历史，<b>运行时已于 2026-10-18 全部删除，只剩记录</b>）：v4 = FreeToken 0.1.3 + 三个本地补丁；v3 = 官方 sglang v0.5.20；v2 = Lsglang 0.5.19-lkmoe + PR #37500；v1 = Lsglang 1.4.13</summary>
 
 | 路线 | 引擎 |
 |---|---|

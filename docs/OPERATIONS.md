@@ -37,7 +37,7 @@ systemd-run --user --unit=strata-prod --collect \
 #    启动器里那条 froggeric 模板守卫已被移除（旧版备份 run_strata.sh.bak-undq4-20261018）。见 TROUBLESHOOTING #45
 # ⚠️ 必须先确认显存已空（见 §3），否则 cudaMalloc OOM
 
-# ── v4（回滚，FreeToken）────────────────────────────
+# ── v4（FreeToken）⛔ 2026-10-18 已删除运行时与权重，下面命令仅存档，不再可用 ──
 bash scripts/start_freetoken.sh        # 自动 sudo 提权 + ulimit -l unlimited + 补丁自检 + 就绪等待
 tail -f /tmp/ft.log
 ```
