@@ -358,6 +358,55 @@ CUDA error: out of memory
 
 ---
 
+## 🔴 39. 升级引擎后行为诡异：三个组件必须是同一个版本
+
+0.1.45 的 `setup.py` 顶部写死了 `MIN_ENGINE = (0, 1, 45)`，`build_engine()` 里的 `stale_binary()` 还会
+对比「二进制里的版本」与「源码版本」，不一致就拒绝安装。所以**不能只换 `serve/server.py`，也不能只换引擎**。
+
+- 症状形态：server 起来了、`/v1/models` 也 200，但某些能力（`--parallel`、新的 `RUNNING` 行解析）
+  静默降级——因为 0.1.45 的 server 会按「引擎太老」处理，不报错，只少给功能。
+- 判据：`engine/BUILD.json` 的 `version`、`engine/strata --version`、`serve/server.py` 里
+  `PARALLEL_MAX`、`setup.py` 里 `MIN_ENGINE` 四者应当指向同一个 tag。
+- 修法：整套换。见 [OPERATIONS.md](OPERATIONS.md) §1c。
+
+## 🔴 40. 别让 `update.sh` / `setup.py` 碰你的模型分片
+
+两条都是上游已知问题，落在我们这种「自己建、自己调参数」的用法上代价很大：
+
+1. **`carry_over()` 不合并手工加进 `args` 的引擎选项**（`setup.py` 自己的注释就写着
+   "Engine options added by hand to `args` are not merged (setup chooses those)"）。我们 config 里
+   有 12 个手调参数（`--prefill auto:32768`、`--kv-resident 32768`、`--vram-reserve-mib 2560`、
+   cvec 那一组……），跑一次 setup 就被它自己的选择覆盖。
+2. **#2902（open）**：setup 的 SHA-256 校验在大分片（43–50 GB）上会算错，**并且把「校验失败」的文件删掉**。
+   实际字节是对的（`sha256sum` / `certutil` 与 Hub 的 `lfs.oid` 一致）。重下 50 GB 只是代价之一。
+
+⇒ 升级只调 `build_engine()`（`scripts/build_engine_upgrade.py` 就是这个用途），绕开下载、校验、写 config 的全过程。
+
+## 🟡 41. 想开 `STRATA_HC_Q8=1`？先看 #2997
+
+上游 0.1.44 起会**由 setup** 给 Unsloth 文件写 `STRATA_HC_Q8=1`（hyper-connection 从 Q8_0 字节直读，
+KL 0.0562→0.0526、每窗口约 −2 ms）。它是 setup 写的，**不是引擎默认**——我们没跑 setup，所以现在没开。
+
+而且开放 PR **#2997 正在修这条路径的 `q8_inject` guard**。在它合入之前开这个开关，等于用一条
+上游自己都还在修的代码路径。⇒ 本站结论：**暂不启用**；要试就单变量试，并且比对输出而不是只看速度。
+
+## 🔵 42. 停止脚本把自己的 shell 杀了（`[s]erve` 括号技巧的第二次翻车）
+
+2026-10-18 实测：把匹配式从 `serve/server.py` 放宽成 `serve[^ ]*/server\.py`（为了兼容 A/B 期间的
+`serve-0.1.43.1/server.py`）之后，**调用方自己的命令行**里只要还出现一串 `serve/server.py`（比如同一条
+bash 命令里另有一个 `grep serve/server.py`），`ps | awk` 就会匹配到那个 bash 并把它 kill 掉——
+`[s]erve` 的括号技巧只防「模式串本身出现在自己的 cmdline 里」，防不住**别处出现的同一段文本**。
+
+**修法**：再用进程名限定一次，只认真正的 python 进程：
+
+```bash
+ps -eo pid=,comm=,args= | awk -v me="$$" '$1 != me && $2 ~ /^python/ && /[s]erve[^ ]*\/server\.py/ {print $1}'
+```
+
+判据：`pgrep -x strata`（引擎二进制名精确匹配，安全）+ 上面这条（只杀 python）。**别再按纯命令行文本匹配。**
+
+---
+
 ## 立即停止条件 (Stop conditions)
 
 host OOM / swap 持续增长 / NVIDIA Xid / 不可恢复 kernel fault / 同失败连续两次无新证据。

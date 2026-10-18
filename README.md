@@ -31,13 +31,14 @@ v5 = GGUF `UD-Q4_K_XL` + Strata，v4 = NVFP4 + FreeToken。两边**位宽都是 
 
 ## 已验证组合 (Verified Stack)
 
-**当前推荐：v5 = Strata 0.1.43.1**（2026-10-13 起；只需 [patch 07](patches/07_strata_esp_family_whitelist.patch) 放行 ESP，
+**当前推荐：v5.1 = Strata 0.1.45**（2026-10-18 起；引擎由 0.1.43.1 升级——短上下文 decode +3.4%、
+32K TTFT −26%、100K TTFT −12%，两臂实测见 [升级文档 §0b](docs/UPGRADE.md)）。只需 [patch 07](patches/07_strata_esp_family_whitelist.patch) 放行 ESP，
 **v4 那三个补丁与本路线无关**。切换记录见 [升级文档](docs/UPGRADE.md)，完整路线说明见 [v5 路线文档](docs/STRATA.md)）
 
 | 层 | 固定身份 |
 |---|---|
 | 模型 | `unsloth/Qwen3.8-Flash-Next-GGUF` → **UD-Q4_K_XL**（ModelScope，111.33 GB / 4 shards，**4-bit**） |
-| 引擎 | **[Niko1221/Strata](https://github.com/Niko1221/Strata) `0.1.43.1`**（Linux 自建；CUDA 13.2 / sm89 / `BUILD.json archs:[89]`）——仅需 [patch 07](patches/07_strata_esp_family_whitelist.patch)（ESP 家族白名单） |
+| 引擎 | **[Niko1221/Strata](https://github.com/Niko1221/Strata) `0.1.45`**（Linux 自建；CUDA 13.2 / sm89 / `BUILD.json archs:[89]`；产出 `strata` + `strata-vision` + **`libstrata_kq.so`**）——仅需 [patch 07](patches/07_strata_esp_family_whitelist.patch)（ESP 家族白名单） |
 | 并发 / 上下文 | `--batch 4` × `--max-context 262144`（每 slot 独立 session） |
 | KV | **`k8v4` + `--kv-resident 32768`**（816 B/cell；KV 流式到宿主内存——4×256K 全放显存会 OOM） |
 | 破限 | **引擎自带 ESP 控制向量**（480 KB，层 4–44，逐请求可关）；强探针关=14/14 拒答、开=0/14 |
@@ -75,7 +76,7 @@ v5 = GGUF `UD-Q4_K_XL` + Strata，v4 = NVFP4 + FreeToken。两边**位宽都是 
 
 同一个模型（Qwen3.8-Flash-Next）、同一 prompt（2336 token）、同一服务入口、客户端计时：
 
-| 指标 | v4（FreeToken 0.1.3） | **v5（Strata 0.1.43.1）** |
+| 指标 | v4（FreeToken 0.1.3） | **v5.0（Strata 0.1.43.1）** |
 |---|---:|---:|
 | 单流 decode | 59.1 t/s | **118 t/s**（2.0×） |
 | 单流 TTFT | 2.73 s | **0.20 s**（14×） |
@@ -86,6 +87,10 @@ v5 = GGUF `UD-Q4_K_XL` + Strata，v4 = NVFP4 + FreeToken。两边**位宽都是 
 | 并发扩展比（1→4 聚合） | **2.55×** | 1.16× |
 | 数学（15 题） | 15/15 | 15/15 |
 | 破限（强探针 14 条） | 0/14 | 0/14（关则 14/14） |
+
+> 📌 **这张表是 0.1.43.1 时代的 v4↔v5 对比，保留作历史基线。** 当前的引擎是 **0.1.45**；
+> 0.1.43.1 → 0.1.45 的两臂实测（不是跨时间快照）见 [升级文档 §0b](docs/UPGRADE.md)：
+> 短上下文 decode 139.7 → **144.5 t/s**、32K TTFT 9.50 → **6.99 s**、100K TTFT 24.78 → **21.82 s**。
 
 > ⚠️ **并发口径**：v5 的 `--batch N` 是**每 slot 独立 session**（VRAM 与主 session 同量），不是
 > llama.cpp 那套 `n_ctx ÷ N`；两个数字都按"聚合 = 总 token ÷ 墙钟"计，跨引擎可比。
@@ -209,7 +214,7 @@ bash scripts/start_freetoken.sh
 
 - **[Niko1221/Strata](https://github.com/Niko1221/Strata)**（**当前引擎**）：自有 C++/CUDA/HIP/SYCL 推理引擎，
   复用 llama.cpp 的 ggml + gguf-py + mtmd；自带 MoE 专家 offload、prefix/conversation cache、
-  以及 **ESP 控制向量破限**。本项目在其 `0.1.43.1` 上验证 4090 单卡路线（Linux 需自建，release 只有 Windows 二进制）。
+  以及 **ESP 控制向量破限**。本项目在其 `0.1.43.1` → `0.1.45` 上验证 4090 单卡路线（Linux 需自建，release 只有 Windows 二进制）。
 - **FlashML-org/FreeToken**（v4，回滚路径）：MoE offload 推理运行时，提供 OpenAI 与 Anthropic 兼容 API。
   本项目在其 `0.1.3` 上验证 4090 单卡 NVFP4 路线，并携带三个未上游化的本地补丁。
 - **官方 sglang**：v3 路线（已转为历史）。v0.5.20 是首个含 qwen4_exp 的正式 tag；官方硬件矩阵仍不含 4090/SM89。

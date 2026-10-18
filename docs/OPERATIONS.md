@@ -1,7 +1,7 @@
 # 运维手册 (Operations)
 
-> **两代引擎互斥**：v5（Strata）与 v4（FreeToken）各占本卡 90%+ 显存，**任何时刻只能活一个**。
-> 切换是停机切换（约 1–2 分钟）。详细路线见 [STRATA.md](STRATA.md)。
+> **两代引擎互斥**：v5.1（Strata 0.1.45）与 v4（FreeToken）各占本卡 90%+ 显存，**任何时刻只能活一个**。
+> 切换是停机切换（约 1–2 分钟）。详细路线见 [STRATA.md](STRATA.md)，同代版本升级见 §1c。
 
 ## 1. 启动 (Start)
 
@@ -54,6 +54,50 @@ bash stop_strata.sh               # 停 v5（含显存释放判据）
 `switch_engine.sh` 的流程：停当前 → **轮询等 `nvidia-smi` used <1000 MiB** → 起目标 →
 按引擎区分的就绪判据 → **走服务入口跑真实推理探针** → 失败则自动回滚。
 ⚠️ 其**真实切换 + 回滚路径尚未实测**（2026-10-13 的切换是手工做的）。
+
+## 1c. 引擎版本升级 (Upgrading to a new upstream tag)
+
+> 2026-10-18 用这套流程从 `0.1.43.1` 升到 `0.1.45`，实测数据见 [UPGRADE.md](UPGRADE.md) §0b。
+
+**顺序不能变**：并行构建 → 冷启动 A/B → 达标才换二进制。**任何一步都不跑 `update.sh` / `setup.py` 主流程**。
+
+```bash
+# ① 并行构建一棵新树（生产树继续跑，零停机）
+git -C strata/Strata fetch origin --tags
+git -C strata/Strata worktree add strata/Strata-<tag> <tag>
+ln -s ../../Strata/third_party/llama.cpp strata/Strata-<tag>/third_party/llama.cpp   # 未跟踪的大目录
+#    把补丁 07 打上（行号随 tag 漂移，上下文不变）
+#    然后只调 build_engine()：<installed tree>/.venv/bin/python scripts/build_engine_upgrade.py --src strata/Strata-<tag>
+#    产物：engine/strata、engine/strata-vision、engine/libstrata_kq.so（0.1.44 起新增）、engine/BUILD.json
+
+# ② 冷启动 A/B：两臂同一份 config，只有 exe / vision.exe 指向不同目录
+bash scripts/arm_start.sh <serve-dir> <config.json> <server.log>
+python scripts/ab_probe.py --arm A            # 6×decode + 1K/32K/100K + 4 路 + 视觉
+python scripts/long_ctx_probe.py --arm A --reps 3  # 长上下文 decode 单独复测（短答案会淹没信号）
+
+# ③ 达标才换（停机约 3 分钟）
+bash strata/stop_strata.sh
+cp -a strata/Strata/engine strata/Strata/engine-<old>        # 留档，回滚用
+cp -a strata/Strata-<tag>/engine/. strata/Strata/engine/     # 整目录：kq 库也要
+git -C strata/Strata stash && git -C strata/Strata checkout <tag>
+git -C strata/Strata apply qwen4090-repo/patches/07_strata_esp_family_whitelist.patch
+bash "/path/to/start_strata_kill_gui.sh"                     # 自己的终端
+```
+
+**准入线**（任一条不过就不切）：短上下文 decode ≥ 0.97× 基线；32K/100K 的 decode 判等；
+1K/32K/100K 的 TTFT 不劣于基线；专家缓存 ≥ 31 GiB；启动后空闲显存 ≥ 1800 MiB；
+视觉三色条 3/3；4 路并发墙钟 ≤ 基线；启动 60 秒内无新 WARNING。
+
+**三条铁律**：
+
+1. **server.py / 引擎 / vision 必须同版本**。0.1.45 的 `setup.py` 写死 `MIN_ENGINE = (0, 1, 45)`，
+   且 `stale_binary()` 会拒绝安装「版本与源码不符」的二进制——只换其中一个会得到诡异行为。
+2. **只调 `build_engine()`，不要跑 setup 主流程**：`carry_over()` 不会合并手工加进 `args` 的选项
+   （12 个手调参数会丢）；且 setup 对大分片算 SHA-256 有已知 bug（#2902），**会删掉正确的模型分片**。
+3. **`engine/` 要整目录替换**，不能只拷 `strata` + `strata-vision`：0.1.44 起多了一个
+   `libstrata_kq.so`（K-quant prompt 内核库），漏了它等于退回旧内核。
+
+回滚见 [UPGRADE.md](UPGRADE.md) §0b.6：`engine-<old>/` 整目录拷回 + `git checkout <old tag>` + 重打补丁。
 
 ## 2. 观察 (Observe)
 

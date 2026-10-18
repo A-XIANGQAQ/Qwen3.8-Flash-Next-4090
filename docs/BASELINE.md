@@ -15,10 +15,10 @@
 同一台主机：**单 RTX 4090 48GB（SM89）+ 38 核 CPU + 247GB RAM**。两代引擎跑同一个模型家族，
 差别在**权重格式 + 引擎**：
 
-| | **v5（当前，2026-10-13 起）** | v4（2026-09-24 起，回滚路径） |
+| | **v5.1（当前，2026-10-18 起）** | v4（2026-09-24 起，回滚路径） |
 |---|---|---|
 | 模型 | `unsloth/Qwen3.8-Flash-Next-GGUF` → **UD-Q4_K_XL**（ModelScope，111.33 GB / 4 shards） | `RadixArk/Qwen3.8-Flash-Next-NVFP4`（ModelScope master，126GB / 206 shards） |
-| 引擎 | **Strata 0.1.43.1**（Linux 自建，仅需 [patch 07](../patches/07_strata_esp_family_whitelist.patch) 放行 ESP） | **FreeToken 0.1.3** + 三个本地补丁（rendezvous 自动避让 / workload / decode-interleave） |
+| 引擎 | **Strata 0.1.45**（Linux 自建，仅需 [patch 07](../patches/07_strata_esp_family_whitelist.patch) 放行 ESP；`engine/` 含 `strata` + `strata-vision` + `libstrata_kq.so`） | **FreeToken 0.1.3** + 三个本地补丁（rendezvous 自动避让 / workload / decode-interleave） |
 | 依赖锁定 | BUILD.json `archs:[89]`、CUDA 13.2 | [freeze-freetoken-0.1.3.txt](freeze-freetoken-0.1.3.txt) |
 | 配置定稿 | `--batch 4`、`--max-context 262144`、`--kv k8v4`、`--kv-resident 32768`、`--batch-mtp`、`--resident-budget-gib 71`、ESP 控制向量 on | `--max-running-requests 4`、`--num-tokens 265216`、`--moe-cache-rate 0.40`、`--moe-strategy offload`（显式）、`--decode-interleave-every 2`、`FREETOKEN_MAMBA_SSM_DTYPE=bfloat16` |
 
@@ -29,7 +29,7 @@
 
 **同机、同 prompt（2336 token）、同一服务入口、客户端计时**，与 v4 同窗口 A/B：
 
-| 指标 | v4（FreeToken 0.1.3） | **v5（Strata 0.1.43.1）** |
+| 指标 | v4（FreeToken 0.1.3） | **v5.0（Strata 0.1.43.1）** |
 |---|---:|---:|
 | 单流 decode | 59.1 t/s | **118 t/s**（2.0×） |
 | 单流 TTFT | 2.73 s | **0.20 s**（14×） |
@@ -46,6 +46,11 @@
 
 > 📌 **本表的 v4 列 ≠ 下方 v4 主表**：本表同窗口 A/B 跑的是**生产配置**（`mrr=4`、`cache-rate 0.40`），
 > 下方主表来自 2026-09-23/24（`mrr=2`、`cache-rate 0.35`）。**两批数字不可跨表混引。**
+>
+> 📌 **上表是 0.1.43.1 时代的基线，保留不动。** 当前引擎 **0.1.45**：0.1.43.1 → 0.1.45 的两臂实测
+> （各自全新启动）在 [UPGRADE.md §0b](UPGRADE.md)——短上下文 decode 139.7 → **144.5 t/s**、
+> 32K TTFT 9.50 → **6.99 s**、100K TTFT 24.78 → **21.82 s**、100K decode 判等、
+> 常驻 RAM 专家 39.45 → **52.10 GiB**。**跨引擎（v4↔v5）与跨版本（0.1.43.1↔0.1.45）是两批独立实验，别混引。**
 >
 > ⚠️ **并发口径**：v5 的 `--batch N` 是**每 slot 独立 session**（VRAM 与主 session 同量，≈0.86 GiB/槽），
 > **不是** llama.cpp 那套 `n_ctx ÷ N`。两列都按「聚合 = 总 token ÷ 墙钟」计，跨引擎可比。

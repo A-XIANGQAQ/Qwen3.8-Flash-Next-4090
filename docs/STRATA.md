@@ -1,7 +1,8 @@
-# v5 路线：Strata（2026-10-13 起）
+# v5 路线：Strata（2026-10-13 起；引擎 2026-10-18 升到 0.1.45）
 
 > 本页记录 **v5**：把生产引擎从 v4（FreeToken 0.1.3 + 三个本地补丁）换成
-> [Niko1221/Strata](https://github.com/Niko1221/Strata) 0.1.43.1。
+> [Niko1221/Strata](https://github.com/Niko1221/Strata)，**当前引擎版本 0.1.45**（2026-10-18 由 0.1.43.1 升级，
+> 两臂实测见 [UPGRADE.md](UPGRADE.md) §0b）。
 > 版本全景见 [UPGRADE.md](UPGRADE.md)，实测数据见 [BASELINE.md](BASELINE.md)。
 
 > [!IMPORTANT]
@@ -18,8 +19,10 @@
 ## 1. 为什么换
 
 两条路线跑的是**同一个基座模型**（Qwen3.8-Flash-Next），差别在引擎与权重格式。同机、同 prompt、同一服务入口、客户端计时：
+（下表是 **2026-10-13 用 0.1.43.1** 做的 v4↔v5 对比，作为历史基线保留；**0.1.43.1 → 0.1.45 的升级实测在
+[UPGRADE.md §0b](UPGRADE.md)**，两批数字不可混引。）
 
-| 指标 | v4（FreeToken 0.1.3） | **v5（Strata 0.1.43.1）** | 倍率 |
+| 指标 | v4（FreeToken 0.1.3） | **v5.0（Strata 0.1.43.1）** | 倍率 |
 |---|---:|---:|---:|
 | 单流 decode | 59.1 t/s | **118 t/s** | **2.0×** |
 | 单流 TTFT | 2.73 s | **0.20 s** | **14×** |
@@ -86,6 +89,37 @@ STRATA_UV=1 ./setup.sh --setup --family unsloth --model UD-Q4_K_XL \
 
 > 💡 **构建与下载可重叠**：`setup.sh` **内部**的引擎编译步骤排在模型下载步骤之前。
 > 下载期间先跑一次 setup 让它把引擎编好，模型到位后再跑一次补齐后续步骤。
+
+### 3.1 升级到新 tag：只调 `build_engine()`，不要重跑 setup
+
+上面那套 `setup.sh` 是**首次安装**用的。机器上已经跑着生产、config 里有 12 个手调参数时，
+**再跑一次 setup 会出事**：`carry_over()` 明确不会合并手工加进 `args` 的选项；而且 setup 对大分片的
+SHA-256 校验有已知 bug（#2902），**会删掉正确的模型分片**。详见 [TROUBLESHOOTING.md](TROUBLESHOOTING.md) #40。
+
+升级走这条路（全程不停机，直到最后换二进制）：
+
+```bash
+cd strata/Strata
+git fetch origin --tags
+git worktree add ../Strata-0.1.45 v0.1.45
+ln -s ../../Strata/third_party/llama.cpp ../Strata-0.1.45/third_party/llama.cpp   # worktree 里没有这个未跟踪目录
+# patch 07 打在 worktree 的 setup.py 上（0.1.43.1 在 5419 行，0.1.45 漂到 6643 行，上下文一致）
+
+# 只调编译入口，__name__ != "__main__" 保证不会跑 main()
+<installed tree>/.venv/bin/python scripts/build_engine_upgrade.py --src strata/Strata-<tag>
+```
+
+产物（0.1.44 起比以前多一个库）：
+
+| 文件 | 0.1.43.1 | 0.1.45 | 说明 |
+|---|---:|---:|---|
+| `engine/strata` | 59.4 MB | 77.9 MB | 引擎（含 K-quant 专家内核） |
+| `engine/strata-vision` | 73.8 MB | 73.7 MB | GPU 图像编码器 |
+| `engine/libstrata_kq.so` | — | **12.6 MB** | K-quant prompt 内核库，**换引擎时必须一起拷** |
+| `engine/BUILD.json` | `src: 7089bf00…` | `src: b9513716…` | 版本与源码指纹 |
+
+满编耗时（76 核，两棵树都在）：**187.8 秒**（引擎 153 个 target + vision 275 个 target）。
+比 §3 里「约 1 分钟」慢，是因为 0.1.44 起多编了 K-quant 内核与 `strata_kq` 库。
 
 ---
 
@@ -233,6 +267,9 @@ A smaller --prefill, or auto, keeps them all in RAM
 > ⚠️ 这与 `--moe-strategy auto`（#24）是**同一类教训**：引擎的启发式是按一般机器调的，
 > **不等于你机器上的最优**——只有单变量上机实测才定案。
 >
+> ✅ **0.1.45 起这行 #669 警告消失了**（两臂启动日志对比：0.1.43.1 有、0.1.45 没有）。
+> 但我们仍显式写 `--prefill auto:32768`——上面的实测结论不因警告消失而改变。
+>
 > ⚠️ 顺带：`run_strata.sh` 用 `> strata-prod.log` **会截断日志**。重启前想留证据的话改成 `>>` 或先备份。
 
 ---
@@ -294,11 +331,20 @@ A smaller --prefill, or auto, keeps them all in RAM
 
 ---
 
-## 9. 未验证 / 待测
+## 9. 已验证 / 未验证
 
-- **长上下文（128K / 256K）未实测**：配置与显存账支持 4×256K，但没在真实长文下跑过
-- **多日稳定性未测**
-- **引擎互切脚本的真实切换+回滚路径未测**（2026-10-13 的切换是手工做的）
+**已在 0.1.45 上验证（2026-10-18，两臂实测见 [UPGRADE.md](UPGRADE.md) §0b）**：
+
+- **100K 上下文已实测**：TTFT 21.8 s、decode 109.0 t/s（512 token × 3 次中位）
+- **sm_89（4090）上没有上游 #2936 报的 decode 回退**：短上下文 +3.4%、32K 判等、100K 判等
+- 视觉三色条 3/3、专家缓存 32.27 GiB / 11050 槽、启动后空闲显存 2161 MiB
+- 0.1.43.1 曾在生产连续跑 **2 天 23 小时**（10-15 09:40 被 cgroup 连带杀掉，不是自己崩的）
+
+**仍未验证**：
+
+- **128K / 256K 上下文未实测**：配置与显存账支持 4×256K，但没在真实长文下跑过（100K 已测）
+- **多日稳定性**：0.1.45 上还没跑过长时间
+- **引擎互切脚本的真实切换+回滚路径未测**（2026-10-13 的切换是手工做的；10-18 的版本升级也是手工换二进制）
 - **8 路以上密集并发的扩展性未测**（本页只有 1/2/4 路）
 - **质量样本仅 15 题数学**（双方 15/15，不构成质量结论）；要做质量结论需上 GSM8K-1319 之类
 - ESP 对普通文本质量的影响未自测（上游报 KL 0.063、困惑度 +15% 代码 / +2.3% 文档 / +0.4% 聊天）

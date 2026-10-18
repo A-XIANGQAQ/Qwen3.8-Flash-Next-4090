@@ -1,6 +1,6 @@
 # 补丁 07：把 unsloth 家族纳入实验性投影（ESP）白名单
 #
-# 目标：Strata 源码根目录的 setup.py（<Strata>/setup.py，356 KB 的自带脚本）
+# 目标：Strata 源码根目录的 setup.py（<Strata>/setup.py 的自带脚本，0.1.45 起 434 KB）
 #
 # 问题：Strata 的 experimental speed projection（ESP，破限用的 480 KB 控制向量）在 setup.py 里
 #   有一道家族门——`if family in ("qwen", "coder")`，Unsloth 家族被 left off。而 Unsloth 的
@@ -18,13 +18,22 @@
 #   patch -p1 < patches/07_strata_esp_family_whitelist.patch
 #   # 或：git apply patches/07_strata_esp_family_whitelist.patch
 #
+# 版本对位（上游没放宽这道门，所以每个 tag 都要重打一次）：
+#   0.1.43.1 → setup.py:5419   （hunk 头 @@ -5419,7 +5419,10 @@）
+#   0.1.45   → setup.py:6643   （hunk 头 @@ -6643,7 +6643,10 @@，本文件即此版本）
+#   两次的上下文一字不差，只有行号漂移；`git apply` 干净通过。
+#
 # ⚠️ 与补丁 04/05/06 不同：那三个打在 FreeToken 的 site-packages 上，只为 v4 回滚路径保留；
 #    本补丁打在 **Strata 源码**上，**属于 v5 主线**。上游若放宽了白名单，本补丁可弃。
+#
+# ⚠️ 只在跑 setup.py 时生效。我们日常的启动路径（serve/server.py + 手工 config 的
+#    --control-vector-scaled）不经过这段代码——补丁的意义是"哪天必须重跑 setup 时，
+#    不会因为这道门把 ESP 丢掉"。
 
 diff --git a/setup.py b/setup.py
 --- a/setup.py
 +++ b/setup.py
-@@ -5419,7 +5419,10 @@
+@@ -6643,7 +6643,10 @@
      # chosen here; with it loaded, the web app and the API switch it off per request
      esp = None
      esp_choice = (a.experimental_speed_projection or "").strip()
