@@ -14,6 +14,11 @@
 > ——上游把实验性投影锁在 `family in ("qwen","coder")`，unsloth 家族拿不到破限（见 §4）。
 > **这不是回滚用的补丁，v5 必须打。**
 
+> ⚠️ **v5.2 起还有一处功能补丁**：[`patches/08-auto-mode.patch`](../patches/08-auto-mode.patch)（2026-10-18）
+> ——模型自带模板有 41 个 `{REASON:xxx}` 模式，但只有用户手写标签才会加载；补丁在 `serve/server.py` 的
+> `Service.prepare()` 前面加一层判断，按问题内容自动挑模式（规则表在新增的 `serve/auto_mode.py`）。
+> 配置里 `"auto_mode": true` 才生效，默认关；**升级引擎后要重打**（`serve/server.py` 会被覆盖）。
+
 ---
 
 ## 1. 为什么换

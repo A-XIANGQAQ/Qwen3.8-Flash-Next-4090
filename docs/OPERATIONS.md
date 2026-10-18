@@ -48,6 +48,31 @@ tail -f /tmp/ft.log
 - ⚠️ v4 脚本必须在**普通用户**的 shell 里运行（会自己 sudo 提权）。root 外壳的 cwd 会让 spawn 出的 worker 崩溃（见 TROUBLESHOOTING）
 - 启动前 v4 脚本会自检三个本地补丁是否在位——缺任何一个直接退出并打印重打命令
 
+## 1a. 模式自动选择 (auto_mode, 2026-10-18)
+
+模型模板带 41 个 `{REASON:xxx}` 模式（27 推理 + 27 指令同文 + 20 个 AI Constructs），**默认自动选**，见
+[patches/08](../patches/08-auto-mode.patch)。运行配置里：
+
+```json
+"auto_mode": true
+```
+
+启动日志会打印一行 `[strata] auto-mode on: ...`；每次命中会打印
+`[strata] auto-mode: coder (2 hits: 单元测试, \bpython\b) for: 帮我写一个 Python 快速排序`。
+
+| 想要 | 做法 |
+|---|---|
+| 自动（默认） | 什么都不写；闲聊不加模式，只有强信号才注入 |
+| 手动指定 | 消息开头写 `{REASON:coder} 你的问题`（显式标签永远优先，自动不再插手） |
+| 关掉自动 | 配置改 `"auto_mode": false` 后重启 |
+| 不吃默认那句 xhigh | `{REASON:off}` |
+
+判据（实测 2026-10-18，同一台机器）：`你好` → 53 prompt tokens；`帮我写一个 Python 快速排序，带单元测试`
+→ 2,721（自动注入 coder）；同会话追问仍是 coder（按会话首个 user 消息记忆，不来回翻）；`{REASON:off}` 覆盖
+→ 17；客户端 `enable_thinking:false` → 自动改注入 `{REASON:i<coder>}`，回复无思考段。
+
+---
+
 ## 1b. 引擎互切 (Switch / Rollback)
 
 ```bash

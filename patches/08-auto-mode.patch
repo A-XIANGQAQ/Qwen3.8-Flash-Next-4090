@@ -1,0 +1,160 @@
+diff --git a/serve/server.py b/serve/server.py
+index 2e805773..31bbd182 100644
+--- a/serve/server.py
++++ b/serve/server.py
+@@ -66,6 +66,7 @@ from serve import logit_bias as bias_api  # noqa: E402
+ from serve.winjob import contain  # noqa: E402
+ from serve.structured import StructuredOutputError, prepare_format, validated_json  # noqa: E402
+ from serve import responses as responses_api  # noqa: E402
++from serve import auto_mode as auto_mode_api  # noqa: E402  (local patch: automatic {REASON:} mode)
+ from serve.responses import ResponsesError, error_body as responses_error_body  # noqa: E402
+ from serve import images as images_api  # noqa: E402
+ 
+@@ -3127,6 +3128,10 @@ class Service:
+         # #458 (opt-in, the config's "effort_position": "end"): a non-default reasoning effort goes in a short system
+         # turn before the answer instead of the top of the prompt, so switching it keeps the cached conversation
+         self.effort_end = False
++        # local patch (2026-10-18): pick the template's {REASON:<mode>} from the question (serve/auto_mode.py);
++        # the config's "auto_mode": true.  auto_modes maps a conversation's first message to its chosen mode.
++        self.auto_mode = False
++        self.auto_modes: dict[str, str] = {}
+         self.conv_log = ConvCacheLog()                  # #596: the parked conversations, from the engine's log
+         self.config_path = None                         # #564: the run config the web page's Settings view edits
+         self.config_lock = threading.Lock()
+@@ -3953,10 +3958,46 @@ class Service:
+             self.prompts.forget(ids)
+ 
+ 
++    def _auto_mode(self, messages, kwargs):
++        """local patch (2026-10-18): no {REASON:} written by the client -> prepend the mode the question asks for
++        (serve/auto_mode.py).  The choice is kept per conversation, keyed by the conversation's first user message, so
++        the mode does not flip between turns and the conversation cache keeps its prefix; the template strips the tag,
++        so the rendered history is identical whichever turn carries it."""
++        if not self.auto_mode:
++            return messages
++        first = last = None
++        for m in messages:
++            if m.get("role") == "user" and isinstance(m.get("content"), str) and m["content"].strip():
++                if first is None:
++                    first = m["content"]
++                last = m["content"]
++        if first is None or auto_mode_api.TAG in last:      # the client picked a mode itself: never second-guess it
++            return messages
++        key = first[:400]
++        mode = self.auto_modes.get(key)
++        if mode is None:
++            mode, why = auto_mode_api.choose(last)
++            if mode is None:
++                return messages
++            if len(self.auto_modes) >= 1024:
++                self.auto_modes.clear()
++            self.auto_modes[key] = mode
++            print(f"[strata] auto-mode: {mode} ({why}) for: {auto_mode_api.short(last)}", flush=True)
++        # `i` keeps a client's enable_thinking=false: the plain tag would turn thinking back on (the template's rule)
++        tag = auto_mode_api.TAG + ("i" if kwargs.get("enable_thinking") is False else "") + mode + "}"
++        out = list(messages)
++        for i in range(len(out) - 1, -1, -1):
++            m = out[i]
++            if m.get("role") == "user" and isinstance(m.get("content"), str) and m["content"].strip():
++                out[i] = dict(m, content=tag + " " + m["content"])
++                break
++        return out
++
+     def prepare(self, messages, tools, kwargs, max_new=None, force=None, req=None, cancel=None):
+         """-> (ids, thinking, max_new). An unset or non-positive max_new (some clients send -1) means "unlimited":
+         the rest of the context.  `force` (forced_call): without thinking the reply starts with it, so it ends the
+         prompt; with thinking, Service.run writes it once the thinking is over."""
++        messages = self._auto_mode(messages, kwargs)      # local patch (2026-10-18)
+         # `cancel` (#1999): set when the client hangs up; the downloads, the wait for the turn and the encodes stop
+         # between pictures and raise ClientGone
+         fetched = self._note_unreadable_tool_images(messages, cancel)
+@@ -6951,6 +6992,10 @@ def main() -> int:
+     if a.engine == "strata":                            # the model card's sampling when nothing else is said (see MODEL_CARD_SAMPLING)
+         svc.model_arch = cfg.get("arch") or "qwen4exp"
+     svc.answer_room = cfg.get("answer_room") is not False
++    svc.auto_mode = cfg.get("auto_mode") is True            # local patch (2026-10-18), opt-in
++    if svc.auto_mode:
++        print("[strata] auto-mode on: a question that clearly asks for a domain (code, law, story, business, ...) "
++              "loads that {REASON:} mode by itself; anything else keeps the template default", flush=True)
+     svc.reasoning_close_retry = cfg.get("reasoning_close_retry") is True    # #1053: opt-in, off by default
+     if cfg.get("images"):                               # image generation (serve/images.py), set up by setup --images
+         icfg = {k: (os.path.abspath(os.path.join(cfg.get("cwd") or ".", v))
+diff --git a/serve/auto_mode.py b/serve/auto_mode.py
+new file mode 100644
+index 00000000..0e7a6dd6
+--- /dev/null
++++ b/serve/auto_mode.py
+@@ -0,0 +1,73 @@
++"""auto_mode (local patch, 2026-10-18): choose one of the model template's `{REASON:<mode>}` modes from the question.
++
++The DavidAU chat template carries 27 reasoning/instruct modes plus 20 AI Constructs, but a mode only loads when the
++user writes `{REASON:xxx}` at the front of a message -- and nobody wants to remember 41 names.  This module keeps the
++choice out of the user's hands: a handful of high-signal words (a code fence, a traceback, 合同/诉讼, 故事, ...) pick
++the mode, everything else stays on the template's own default.
++
++Conservative on purpose: a rule needs `need` independent word hits, or one of its `strong` markers (a code block, a
++traceback, 证明, 头脑风暴...) on its own.  A question that does not clearly belong to a domain gets no mode at all, so
++a plain chat keeps behaving like a plain chat.
++
++Rules are ordered specific -> general: the first strong hit wins, so "解释一下这个合同的条款" is a legal question
++(matlock) rather than a teaching one (teacher).
++
++Measured 2026-10-18 on 17 questions (11 domains + 5 that must stay unmapped): 17/17, see the doc's §4.
++"""
++
++# (mode, need, strong, words) -- `strong`: one hit is enough; `words`: distinct regexes, `need` of them must hit.
++RULES = [
++    ("coder", 2, [r"```", r"\btraceback\b", r"\bsegfault\b", r"stack ?trace", r"代码", r"报错"],
++     [r"报错", r"异常", r"编译", r"函数", r"重构", r"单元测试", r"\bbug\b", r"\bapi\b", r"接口", r"代码", r"脚本",
++      r"算法", r"数据结构", r"部署", r"依赖", r"\bpython\b", r"\bjavascript\b", r"\btypescript\b", r"\bgolang\b",
++      r"\brust\b", r"\bjava\b", r"\bsql\b", r"\bregex\b", r"\bdocker\b", r"\bnpm\b", r"\bpip\b", r"\bcargo\b",
++      r"\bcuda\b", r"\bpytorch\b"]),
++    ("matlock", 2, [r"诉讼", r"判例", r"竞业"],
++     [r"法律", r"法规", r"法条", r"合同", r"条款", r"仲裁", r"合规", r"侵权", r"违约", r"劳动法", r"律师"]),
++    ("house", 2, [r"诊断", r"病历"],
++     [r"症状", r"病因", r"化验", r"检查报告", r"指标异常", r"用药", r"临床", r"头晕", r"疼痛", r"发烧"]),
++    ("business", 2, [r"商业模式", r"创业"],
++     [r"商业", r"市场", r"营销", r"定价", r"营收", r"利润", r"获客", r"融资", r"\bbp\b", r"竞品", r"供应链",
++      r"加盟", r"开店", r"变现", r"获客成本"]),
++    ("spoon", 2, [r"研究现状", r"证据链", r"白皮书"],
++     [r"调研", r"综述", r"文献", r"深度报告", r"系统性", r"横向对比"]),
++    ("story", 2, [r"故事", r"小说", r"剧本"],
++     [r"散文", r"叙事", r"人物设定", r"对白", r"世界观", r"情节", r"写一[篇个段]"]),
++    ("prompt", 1, [r"提示词", r"\bprompt\b"],
++     [r"系统提示", r"指令模板", r"角色设定"]),
++    ("comedy", 2, [r"段子", r"脱口秀"],
++     [r"笑话", r"吐槽", r"搞笑", r"梗", r"相声"]),
++    ("brainstorm", 1, [r"头脑风暴", r"点子"],
++     [r"创意", r"想法", r"灵感", r"命名", r"起名"]),
++    ("logic", 2, [r"证明", r"反例", r"第一性原理", r"形式化"],
++     [r"推导", r"是否成立", r"逻辑", r"漏洞", r"自相矛盾"]),
++    ("teacher", 2, [],
++     [r"解释", r"讲清楚", r"通俗", r"入门", r"教我", r"什么是", r"原理", r"怎么理解", r"举例说明"]),
++]
++
++TAG = "{REASON:"
++
++
++def choose(text: str):
++    """-> (mode or None, why).  None when the question does not clearly belong to a domain."""
++    import re
++    low = text.lower()
++    score = {}
++    for mode, need, strong, words in RULES:
++        if any(re.search(p, low) for p in strong):      # specific rules come first: the first strong hit wins
++            return mode, "strong match"
++        hits = [p for p in words if re.search(p, low)]
++        score[mode] = (len(hits), need, hits)
++    best = None
++    for mode, _, _, _ in RULES:
++        n, need, hits = score[mode]
++        if n >= need and (best is None or n > best[1]):
++            best = (mode, n, hits)
++    if best is None:
++        return None, ""
++    return best[0], f"{best[1]} hits: " + ", ".join(best[2][:3])
++
++
++def short(text: str, n: int = 48) -> str:
++    text = " ".join(text.split())
++    return text[:n] + ("..." if len(text) > n else "")

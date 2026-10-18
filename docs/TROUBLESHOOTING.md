@@ -498,6 +498,39 @@ systemd-run --user --unit=strata-prod --collect \
 
 ---
 
+## 🔴 48. 只发 `{REASON:xxx}` 一个标签：模型回你一句「你好」
+
+模板会把标签**从 user 文本里整段删掉**。如果一条消息**只有**标签，删完 user 回合就是空的：
+
+```
+<|im_start|>user
+<|im_end|>            ← 一个字都没有
+```
+
+模型收到的是「系统提示 9,409 字符 + 空提问」，于是去揣测「用户发了条空消息」再打招呼。
+2026-10-18 实测：`{REASON:help}` 单独发 → 2,288 prompt tokens，回复「你好」；
+`{REASON:help} 显示帮助菜单` → 2,291 tokens，直接吐出帮助菜单。
+
+⇒ **标签后面必须跟真正的问题**（自动模式补丁不改变这一点，它只负责挑标签，不负责替你提问）。
+另：客户端如果自带大系统提示（实测某个 22.6k token 的 agent 客户端），模型会把空回合解释成
+`<local-command-stdout></local-command-stdout>` 这类「空命令输出」，那是症状不是原因。
+
+## 🔴 49. 升级 Strata 之后自动模式失效（`serve/server.py` 被覆盖）
+
+[patches/08](../patches/08-auto-mode.patch) 改了 `serve/server.py` 并新增 `serve/auto_mode.py`。
+`git checkout` 换 tag 会保留工作区改动，但 `setup.sh` 重建/重解压或重新 clone 会丢掉它们。
+
+判据：`curl -s 127.0.0.1:8000/props >/dev/null; journalctl --user -u strata-prod | grep -c "auto-mode on"`，
+启动后应为 1。恢复：
+
+```bash
+git -C strata/Strata apply qwen4090-repo/patches/08-auto-mode.patch
+```
+
+（patch 07 是 `setup.py`，patch 08 是 `serve/`——两者互不影响，顺序无所谓。）
+
+---
+
 ## 立即停止条件 (Stop conditions)
 
 host OOM / swap 持续增长 / NVIDIA Xid / 不可恢复 kernel fault / 同失败连续两次无新证据。
