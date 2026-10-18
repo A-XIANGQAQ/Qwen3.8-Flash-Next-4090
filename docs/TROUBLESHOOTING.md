@@ -507,27 +507,34 @@ systemd-run --user --unit=strata-prod --collect \
 <|im_end|>            ← 一个字都没有
 ```
 
-模型收到的是「系统提示 9,409 字符 + 空提问」，于是去揣测「用户发了条空消息」再打招呼。
+模型手里握着上万字的关系/人格提示，面前却是空提问，于是去揣测「用户发了条空消息」再打招呼。
 2026-10-18 实测：`{REASON:help}` 单独发 → 2,288 prompt tokens，回复「你好」；
 `{REASON:help} 显示帮助菜单` → 2,291 tokens，直接吐出帮助菜单。
 
-⇒ **标签后面必须跟真正的问题**（自动模式补丁不改变这一点，它只负责挑标签，不负责替你提问）。
-另：客户端如果自带大系统提示（实测某个 22.6k token 的 agent 客户端），模型会把空回合解释成
-`<local-command-stdout></local-command-stdout>` 这类「空命令输出」，那是症状不是原因。
+⇒ **标签后面必须跟真正的问题。**（自动选择不改变这一点：它只挑模式，不替你提问。）
 
-## 🔴 49. 升级 Strata 之后自动模式失效（`serve/server.py` 被覆盖）
+## 🔴 49. 自定义/合并的 chat 模板被 `setup.sh` 冲掉
 
-[patches/08](../patches/08-auto-mode.patch) 改了 `serve/server.py` 并新增 `serve/auto_mode.py`。
-`git checkout` 换 tag 会保留工作区改动，但 `setup.sh` 重建/重解压或重新 clone 会丢掉它们。
+`setup.sh` 每次都会从 GGUF **重新导出** `tokenizer.chat_template.jinja`；手工替换的模板（froggeric、
+或本仓库的[合并模板](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)）**必被覆盖**，而且不报错，
+只表现为"模式突然不生效了"。
 
-判据：`curl -s 127.0.0.1:8000/props >/dev/null; journalctl --user -u strata-prod | grep -c "auto-mode on"`，
-启动后应为 1。恢复：
+判据：
 
 ```bash
-git -C strata/Strata apply qwen4090-repo/patches/08-auto-mode.patch
+wc -c <pack>/tokenizer/chat_template.jinja
+#   合并模板 246686   |   froggeric 28234   |   原装 226745
+curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["chat_template"]))'
+#   合并模板 241214
 ```
 
-（patch 07 是 `setup.py`，patch 08 是 `serve/`——两者互不影响，顺序无所谓。）
+恢复：
+
+```bash
+cp qwen4090-repo/patches/08_qwen38_froggeric_v225_with_dau_modes.jinja \
+   strata-data/packs/<模型>/tokenizer/chat_template.jinja
+# 然后重启（约 40 秒就绪）
+```
 
 ---
 

@@ -47,7 +47,7 @@ v5 = GGUF `UD-Q4_K_XL` + Strata，v4 = NVFP4 + FreeToken。两边**位宽都是 
 | 破限 | **模型自带 abliteration**（原 UD-Q4_K_XL 路线靠引擎 ESP 控制向量；强探针 0/14 拒答，温和 0/22） |
 | 图像 | **自带 vision 编码器**（`mmproj-…-BF16.gguf` 0.91 GB，与 HF 仓库那份逐字节相同，GPU 模式）；图像 token 上限 1024，占 ~1.4 GB 显存 |
 | Chat Template | **模型自带的 221,835 字符模板**（27 推理 + 27 指令模式 + AI Constructs）。⚠️ **不能再套 froggeric 模板**——旧启动器的守卫会覆盖它，生产启动器已去掉该守卫 |
-| 模式选择 | **自动**（本地补丁 [`patches/08`](patches/08-auto-mode.patch)）：问题里出现代码块/`报错`/`合同`/`故事`/`调研` 等强信号时，服务端自己挑一个 `{REASON:mode}` 注入；闲聊保持默认 `xhigh`，什么都不用写 |
+| 模式选择 | **自动 + 模板内**（[合并模板](patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)）：把模型自带 41 个模式**有机并进 froggeric v22.5**，由模板自己按关键词挑模式；闲聊不加任何系统提示。**不改服务端代码** |
 | GPU | 单 RTX 4090 **48GB** / sm89 / TP1 |
 
 <details>

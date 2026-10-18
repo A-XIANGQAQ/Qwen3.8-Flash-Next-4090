@@ -48,28 +48,50 @@ tail -f /tmp/ft.log
 - ⚠️ v4 脚本必须在**普通用户**的 shell 里运行（会自己 sudo 提权）。root 外壳的 cwd 会让 spawn 出的 worker 崩溃（见 TROUBLESHOOTING）
 - 启动前 v4 脚本会自检三个本地补丁是否在位——缺任何一个直接退出并打印重打命令
 
-## 1a. 模式自动选择 (auto_mode, 2026-10-18)
+## 1a. 模式自动选择（模板内，2026-10-18）
 
-模型模板带 41 个 `{REASON:xxx}` 模式（27 推理 + 27 指令同文 + 20 个 AI Constructs），**默认自动选**，见
-[patches/08](../patches/08-auto-mode.patch)。运行配置里：
+模型自带 41 个 `{REASON:xxx}` 模式（27 推理 = 7 核心 + 20 Constructs，另有 3 工具档 / 3 Qwen 档 / 8 个 x 合成档）。
+DavidAU 原装模板要用户手写标签才加载——没人愿意记 41 个名字，所以把两件事**在一份模板里**合成：
 
-```json
-"auto_mode": true
-```
+| | |
+|---|---|
+| 底子 | [froggeric v22.5](https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates)（effort 别名、think 标记、工具调用、截断、连续失败告警） |
+| 加上 | 模型自带的 29 段模式正文（逐字节照搬）+ `instruction_map` 41 键 + `{REASON:}` 解析 + 自动选择 |
+| 产物 | [`patches/08_qwen38_froggeric_v225_with_dau_modes.jinja`](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)（246,686 字节，生成器 [`patches/08_merge_template.py`](../patches/08_merge_template.py)） |
+| 装机 | `cp ... <pack>/tokenizer/chat_template.jinja`，然后重启（约 40 秒就绪） |
 
-启动日志会打印一行 `[strata] auto-mode on: ...`；每次命中会打印
-`[strata] auto-mode: coder (2 hits: 单元测试, \bpython\b) for: 帮我写一个 Python 快速排序`。
+**服务端代码一行没改**。判据：`git -C strata/Strata status --short` 里只有 `setup.py`（patch 07），`serve/` 干净。
+
+三种用法，互不排斥：
 
 | 想要 | 做法 |
 |---|---|
-| 自动（默认） | 什么都不写；闲聊不加模式，只有强信号才注入 |
-| 手动指定 | 消息开头写 `{REASON:coder} 你的问题`（显式标签永远优先，自动不再插手） |
-| 关掉自动 | 配置改 `"auto_mode": false` 后重启 |
-| 不吃默认那句 xhigh | `{REASON:off}` |
+| 自动（默认） | 直接问。代码/法律/医疗/商业/调研/故事/提示词/喜剧/头脑风暴/证明/讲解 等关键词命中就加载对应模式 |
+| 手动 | 消息里写 `{REASON:coder} 你的问题`——标签优先，自动不再插手 |
+| 不加任何系统提示 | `{REASON:off}` |
 
-判据（实测 2026-10-18，同一台机器）：`你好` → 53 prompt tokens；`帮我写一个 Python 快速排序，带单元测试`
-→ 2,721（自动注入 coder）；同会话追问仍是 coder（按会话首个 user 消息记忆，不来回翻）；`{REASON:off}` 覆盖
-→ 17；客户端 `enable_thinking:false` → 自动改注入 `{REASON:i<coder>}`，回复无思考段。
+自动规则：**强信号 1 个即中，普通信号要 2 个独立命中**，按「具体 → 一般」排序（coder / matlock / house /
+business / spoon / story / prompt / comedy / brainstorm / logic / teacher）。
+判定看的是**整个会话的 user 文本**（最近 4000 字符），所以一个会话里一旦命中就粘住，不会来回翻、不吃缓存。
+
+实测 2026-10-18（同一台 4090 / Strata 0.1.45）：
+
+| 请求 | prompt tokens | 模式 |
+|---|---:|---|
+| `你好` | **11** | 无（froggeric 默认 medium，连系统提示都不发） |
+| `帮我写一个 Python 快速排序，带单元测试` | **2,721** | coder（自动） |
+| 同会话追问 `继续` | 2,737 | coder（粘住） |
+| `解释一下什么是熵，通俗一点` | 3,124 | teacher（自动） |
+| `这个竞业限制条款在劳动法下有效吗？` | 2,310 | matlock（自动） |
+| `{REASON:pkd} 现实是什么` | 2,063 | pkd（手动） |
+| `{REASON:off} 你好` | 11 | 无 |
+| 关思考 + 编程题 | 2,723 | coder，回复里没有思考段 |
+
+离线 24 个用例（11 领域 + 13 个必须不触发）**全对**，且是同一份模板渲染出来的，不是别的层代劳。
+
+⚠️ 两个边界：① `{REASON:i<mode>}`（i = 不要思考）**管不住服务端的解析**——标签只改模板的前缀，服务端仍按
+「思考中」解析回复，答案会落进 `reasoning_content`；要真关思考请用客户端的开关（`enable_thinking:false`），
+那条路径实测正常。② `setup.sh` 每次都会从 GGUF **重新导出**原装模板，覆盖这一份，见[TROUBLESHOOTING #49](TROUBLESHOOTING.md)。
 
 ---
 

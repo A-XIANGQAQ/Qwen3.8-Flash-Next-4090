@@ -14,10 +14,11 @@
 > ——上游把实验性投影锁在 `family in ("qwen","coder")`，unsloth 家族拿不到破限（见 §4）。
 > **这不是回滚用的补丁，v5 必须打。**
 
-> ⚠️ **v5.2 起还有一处功能补丁**：[`patches/08-auto-mode.patch`](../patches/08-auto-mode.patch)（2026-10-18）
-> ——模型自带模板有 41 个 `{REASON:xxx}` 模式，但只有用户手写标签才会加载；补丁在 `serve/server.py` 的
-> `Service.prepare()` 前面加一层判断，按问题内容自动挑模式（规则表在新增的 `serve/auto_mode.py`）。
-> 配置里 `"auto_mode": true` 才生效，默认关；**升级引擎后要重打**（`serve/server.py` 会被覆盖）。
+> ⚠️ **v5.2 起还换了一份 chat 模板**：[`patches/08_qwen38_froggeric_v225_with_dau_modes.jinja`](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)
+> —— 把 DavidAU 模型自带的 41 个 `{REASON:xxx}` 模式（29 段正文逐字节照搬）并进 froggeric v22.5，
+> 由模板自己按关键词选模式，**服务端代码一行不改**。装机 = 拷到 `<pack>/tokenizer/chat_template.jinja` 后重启；
+> `setup.sh` 会从 GGUF 重新导出原装模板覆盖它，重跑 setup 后要再拷一次（TROUBLESHOOTING #49）。
+> 生成器：[`patches/08_merge_template.py`](../patches/08_merge_template.py)。
 
 ---
 
