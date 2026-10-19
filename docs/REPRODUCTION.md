@@ -24,12 +24,13 @@
 
 ## 3. 环境安装 (Environment Install)
 
-**当前路线（v5）= Strata**，见 §3C；**v4 = FreeToken**（§3A）已转为回滚路径；历史路线（v3/v1，sglang）见 §3B。
+**当前路线（v5）= Strata，见 §3C（先看这个）**。v4（FreeToken）/ v3 / v1（sglang）的安装步骤保留为历史——
+对应运行时与 venv 都已删除，要复活得先重装引擎。
 
 > ⚠️ 两代引擎各占本卡 90%+ 显存，**同一时刻只能跑一个**（装在同一台机器上互不冲突，但起服务前必须停掉另一个，
 > 且**等显存降到 <1000 MiB**，见 [TROUBLESHOOTING #29](TROUBLESHOOTING.md)）。
 
-### 3A. v4：FreeToken + 三个本地补丁
+### 3A. v4：FreeToken + 三个本地补丁（历史，运行时已删除）
 
 ```bash
 uv venv ~/ft-venv --python 3.12
@@ -116,37 +117,54 @@ STRATA_UV=1 ./setup.sh --setup --family unsloth --model UD-Q4_K_XL \
 
 ## 4. 模型下载 (Model Download)
 
-### 4A. v5（当前）：`unsloth/Qwen3.8-Flash-Next-GGUF` → UD-Q4_K_XL
+### 4A. 当前（v5.2）：`DavidAU/…-GSQ-RCO-GGUF` → IQ3_S
+
+```bash
+modelscope download --model \
+  DavidAU/Qwen3.8-Flash-Next-Abliterated-Uncensored-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF \
+  --include '*IQ3_S*' --local_dir /path/to/DavidAU-abliterated-IQ3_S
+```
+
+- 约 **83.86 GB / 2 shards**，3.5 bpw
+- **自带 abliteration**：不需要 ESP 控制向量 ⇒ 也不需要 [patch 07](../patches/07_strata_esp_family_whitelist.patch)
+- ⚠️ **HF 在本机实测仅 234 B/s**，不可用——一律走 ModelScope
+
+**视觉编码器（要读图，`--vision yes`）**：`mmproj-Qwen3.8-Flash-Next-BF16.gguf`（907,543,008 B），
+来自 `ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF`——**ModelScope 上没有这个仓库**，只能走 HF 或镜像，
+配合 `tools/vision` 的 `strata-vision` 二进制。实测 HF 走代理单连接 ~220–400 KB/s，**12 路并行分块可到 4.1 MB/s**，
+详见 [STRATA.md §5.3](STRATA.md)。
+
+### 4B. 历史：`unsloth/Qwen3.8-Flash-Next-GGUF` → UD-Q4_K_XL
+
+<details>
+<summary>展开（2026-10-18 前的生产模型，111.33 GB / 4 shards）</summary>
 
 ```bash
 modelscope download --model unsloth/Qwen3.8-Flash-Next-GGUF \
   --include '*UD-Q4_K_XL*' --local_dir /path/to/UD-Q4_K_XL
 ```
 
-- 约 **111.33 GB / 4 shards**
-- 字节数与 ModelScope API 逐条核对过（下载不完整会以 GGUF 解析失败的形式暴露）
-- ⚠️ **HF 在本机实测仅 234 B/s**，不可用——一律走 ModelScope
+- 约 **111.33 GB / 4 shards**，字节数与 ModelScope API 逐条核对过
+- 这个路线**需要 patch 07**：上游把 ESP 白名单锁在 `family in ("qwen","coder")`，unsloth 家族拿不到破限
+- 换到 IQ3_S 的实测对比见 [UPGRADE §0c](UPGRADE.md)
 
-**另需视觉编码器（要读图的话，`--vision yes`）**：`mmproj-Qwen3.8-Flash-Next-BF16.gguf`，
-**907,543,008 B**，来自 `ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF`——
-**ModelScope 上没有这个仓库**，只能走 HF 或镜像；配合 `tools/vision` 的 `strata-vision` 二进制使用。
-实测 HF 走代理单连接仅 ~220–400 KB/s，**12 路并行分块可到 4.1 MB/s**。详见 [STRATA.md §5.3](STRATA.md)。
+</details>
 
-### 4B. v4（回滚）：`RadixArk/Qwen3.8-Flash-Next-NVFP4`
+### 4C. 历史：`RadixArk/Qwen3.8-Flash-Next-NVFP4`（v4，运行时已删除）
+
+<details>
+<summary>展开（126 GiB / 206 shards）</summary>
 
 ```bash
-export HF_HUB_OFFLINE=0
 modelscope download --model RadixArk/Qwen3.8-Flash-Next-NVFP4 \
   --local_dir /path/to/RadixArk--Qwen3.8-Flash-Next-NVFP4
 ```
 
-- 约 **126GiB / 206 shards**
+- 约 **126 GiB / 206 shards**
 - ⚠️ **revision**：TomPython 项目记录的 HF revision（`7b7192...`）在 **ModelScope 不存在**，直接下 master
-- 校验：
-  ```bash
-  python3 scripts/verify_model_index.py /path/to/RadixArk--Qwen3.8-Flash-Next-NVFP4 --expected-shards 206
-  # 期望: {"index_shards": 206, "expected_shards": 206, "missing": [], "empty": []}
-  ```
+- 校验：`python3 scripts/verify_model_index.py <dir> --expected-shards 206`
+
+</details>
 
 ## 5. Chat Template：合并模板（froggeric v22.5 + 模型自带模式）
 
@@ -209,7 +227,7 @@ tail -f strata/strata-prod.log
 #                                        Anthropic: /v1/messages, context 262144 tokens)
 ```
 
-⚠️ **必须用启动器**，不要用 `./setup.sh` 无参起服务——它会自己拉起模型并绕开 chat 模板守卫（见 §5B）。
+⚠️ **必须用启动器**，不要用 `./setup.sh` 无参起服务——它会自己拉起模型、并把 pack 里的合并模板重导成**原装**（判据 `wc -c` = 226745，见 §5A）。
 ⚠️ **起之前确认显存已空**：`nvidia-smi --query-gpu=memory.used --format=csv,noheader` 轮询到 **<1000 MiB**，
 否则 `cudaMalloc` OOM（[TROUBLESHOOTING #29](TROUBLESHOOTING.md)）。
 
@@ -236,12 +254,14 @@ curl -s localhost:8000/v1/chat/completions \
 **v5（Strata）——三层判据，缺一不可**：
 
 - [ ] **进程到位**：`pgrep -x strata` 有结果，serve 层在听 `:8000`
-- [ ] **破限判据行**在日志里：`control vector mode = project, dir = per-layer, layers 4..44 (41 steered)`
+- [ ] **模板是合并版**：`wc -c <pack>/tokenizer/chat_template.jinja` = **248855**（原装是 226745）
+- [ ] **破限**：当前模型自带 abliteration，日志里**不该**出现 ESP 控制向量行（那是 UD-Q4_K_XL 路线的东西）
 - [ ] **端到端真推理**：发一条中文请求，正文可读、无乱码
-- [ ] 模型分片齐（4 shards）、`/v1/models` 返回预期 id
+- [ ] 模型分片齐（**2 shards**，IQ3_S）、`/v1/models` 返回预期 id
 - [ ] RAM 有余量、swap 为 0、无 Xid/OOM
-- [ ] 显存 ~47GB（装 vision 前实测 **48,438 / 49,140 MiB**；装后 **48,335 / 49,140 MiB**，引擎日志报 329 MiB free）
+- [ ] 显存 ~46.4 GB（2026-10-19 实测 **46,435 / 49,140 MiB**，含 vision）
 - [ ] （装了图的话）发一张测试图，模型能正确描述——并确认 `pgrep -x strata-vision` 有进程
+- [ ] **模式自动选择**：`python3 qwen4090-repo/patches/08_auto_check.py --set dev+val` 应得 dev 95.9% / val 90.0%
 - [ ] ⚠️ **本次未验证**：长上下文（128K/256K）、工具调用结构化、多日稳定性
 
 **v4（FreeToken）**：
