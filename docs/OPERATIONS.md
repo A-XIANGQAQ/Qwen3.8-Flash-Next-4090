@@ -1,7 +1,8 @@
 # 运维手册 (Operations)
 
-> **两代引擎互斥**：v5.1（Strata 0.1.45）与 v4（FreeToken）各占本卡 90%+ 显存，**任何时刻只能活一个**。
-> 切换是停机切换（约 1–2 分钟）。详细路线见 [STRATA.md](STRATA.md)，同代版本升级见 §1c。
+> **只有一条路能跑**：v5（Strata 0.1.45）。v4（FreeToken）的运行时与权重**已于 2026-10-18 删除**，
+> 回滚需要重新安装引擎——§1b 的流程保留作记录，**现在执行不了**。
+> 引擎细节见 [STRATA.md](STRATA.md)，同代版本升级见 §1c，模板见 [TEMPLATE.md](TEMPLATE.md)。
 
 ## 1. 启动 (Start)
 
@@ -38,7 +39,7 @@ systemd-run --user --unit=strata-prod --collect \
 # ⚠️ 必须先确认显存已空（见 §3），否则 cudaMalloc OOM
 
 # ── v4（FreeToken）⛔ 2026-10-18 已删除运行时与权重，下面命令仅存档，不再可用 ──
-bash scripts/start_freetoken.sh        # 自动 sudo 提权 + ulimit -l unlimited + 补丁自检 + 就绪等待
+bash scripts/archive/start_freetoken.sh        # 自动 sudo 提权 + ulimit -l unlimited + 补丁自检 + 就绪等待
 tail -f /tmp/ft.log
 ```
 
@@ -48,78 +49,23 @@ tail -f /tmp/ft.log
 - ⚠️ v4 脚本必须在**普通用户**的 shell 里运行（会自己 sudo 提权）。root 外壳的 cwd 会让 spawn 出的 worker 崩溃（见 TROUBLESHOOTING）
 - 启动前 v4 脚本会自检三个本地补丁是否在位——缺任何一个直接退出并打印重打命令
 
-## 1a. 模式自动选择（模板内，v2 · 2026-10-19）
+## 1a. 模式自动选择（模板内）
 
-模型自带 33 个可用 `{REASON:xxx}` 模式（29 段正文 + 4 个 effort 档）。DavidAU 原装模板要用户手写标签才加载——
-没人愿意记这些名字，所以把两件事**在一份模板里**合成：
+一份模板同时做渲染修复与模式选择，规则/词表/评测全在 [TEMPLATE.md](TEMPLATE.md)。常用的三条命令：
 
-| | |
-|---|---|
-| 底子 | [froggeric v22.5](https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates)（effort 别名、think 标记、工具调用、截断、连续失败告警） |
-| 加上 | 模型自带的 29 段模式正文（逐字节照搬）+ `instruction_map` 33 键 + `{REASON:}` 解析 + 自动选择 |
-| 产物 | [`patches/08_qwen38_froggeric_v225_with_dau_modes.jinja`](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)（248,855 字节；`/props` 243,052 字符） |
-| 词表 | 生成器 [`patches/08_merge_template.py`](../patches/08_merge_template.py) 里的 `MODE_LEX`；生成时同时写一份 `.lexicon.json` 供评测工具读 |
-| 装机 | `cp ... <pack>/tokenizer/chat_template.jinja`，然后重启（约 40 秒就绪） |
+```bash
+python3 patches/08_auto_check.py --set dev+val                  # 离线回归（渲染真实模板）
+python3 patches/08_auto_check.py --case "讲个笑话"               # 单条排查，带分数
+wc -c <pack>/tokenizer/chat_template.jinja                      # 248855 = v2 已装
+```
 
-**服务端代码一行没改**。判据：`git -C strata/Strata status --short` 里只有 `setup.py`（patch 07），`serve/` 干净。
+判定一句话：**分数 ≥ 2 且严格高于第二名才选，否则不选**（回落 froggeric 默认）。
+线上判据：`讲个笑话` 的 prompt_tokens ≈ 2847（选了 comedy）或 11（完全没选）。
 
-### 判定规则（v2：三条同时满足才选）
+## 1b. 引擎互切 (Switch / Rollback) —— ⛔ 仅存档，v4 运行时已删除
 
-1. **分数 ≥ 2**。词表分三层：`3` = 无歧义（`traceback`/`代码`/`竞业`/`体检`/`第一性原理`…），`2` = 主题词，`1` = 弱提示。
-2. **边际胜出**：最高分必须**严格高于**第二名（平分 → 不选）。这一条取代了 v1 的固定优先级——v1 里 `matlock` 4 分
-   会输给 `coder` 2 分，只要 coder 排在前面。
-3. **判不准就不选**：回落到 froggeric 默认（`medium`），绝不硬猜。误套 persona 的代价远大于不套。
-
-匹配细节：**ASCII 单词走词边界**（先把中英文标点拍平成空格，`trust` 不会命中 `rust`、`pipeline` 不会命中 `pip`）；
-中文词与 ```` ``` ```` 走子串。只看 **user 消息**——不扫 system：一段真实的英文 agent 系统提示（3,421 字符）
-单独就能打 `coder 4 / prompt 2`，扫进去等于把模式钉死在 coder，而且会随客户端提示词漂移。
-
-判定看的是**整个会话的 user 文本**（最近 4000 字符），所以一个会话里一旦命中就粘住，不会来回翻、不吃前缀缓存。
-
-### 实测（2026-10-19，同一台 4090 / Strata 0.1.45）
-
-| 集合 | 规模 | 命中 | 错选 | 弃权 | 准确率 |
-|---|---:|---:|---:|---:|---:|
-| dev（调参集） | 73 | 70 | **0** | 3 | **95.9%** |
-| val（每轮检查） | 30 | 27 | **0** | 3 | **90.0%** |
-| test（锁定，只跑一次） | 40 | 29 | **0** | 11 | **72.5%** |
-
-**没达到计划里「test ≥ 90%」的目标**。全部错例都是弃权，没有一条选错模式；差距来自词表仍不覆盖手写改写——
-`git rebase`、`长期头痛`、`客户`、`挂号`、`营销`(只有 1 分)、`融资`(只有 1 分) 这类。要继续提升必须先写**新的**锁定
-测试集：现有的 test 已经被看过，不能再当验收集用。
-
-线上 spot check（重启后，`max_tokens=1` 读 `prompt_tokens`）：
-
-| 请求 | prompt tokens | 模式 |
-|---|---:|---|
-| `你好` | 11 | 不选（连系统提示都不发） |
-| `讲个笑话` | **2,847** | comedy（v1 时是 13 = 不选） |
-| `这个 bug 的法条依据是什么` | 17 | 不选（双主题，弃权） |
-| `I trust you, this pipeline is rapid` | 18 | 不选（词边界生效） |
-| `diagnose this segfault` | 2,717 | coder |
-
-渲染成本：v1 0.375 ms → v2 **0.446 ms**（200 次均值，同一台机器）。贵的那 0.07 ms 就是多算 200 个词的边界匹配。
-
-### 评测工具
-
-| 工具 | 用途 |
-|---|---|
-| [`patches/08_auto_check.py`](../patches/08_auto_check.py) | **渲染真实模板**认模式（不写 Python 复刻）：`--set dev\|val\|test\|dev+val`、`--explain` 打印分数、`--case "…"` 单条排查；镜像与模板不一致会报 `[DRIFT]` |
-| [`patches/08_autolex_gen.py`](../patches/08_autolex_gen.py) | 用本地模型按模式生成改写语料（每条请求带 `{REASON:ioff}`——不关模式的话，模式正文会把「每行一条问题」的输出格式污染成 `⎔⎔⎔ teacher ⎔`） |
-| [`patches/08_autolex_mine.py`](../patches/08_autolex_mine.py) | 挖 2–4 字短语 + 英文词，按 `lift = P(词\|本模式)/P(词\|其他)` 排序；带**左右边界熵**过滤，去掉 `看看这段`/`该怎` 这类碎片 |
-
-改词表的顺序：`08_autolex_gen.py` 生成语料 → `08_autolex_mine.py` 出候选 → 人工复核 → 改 `MODE_LEX` →
-`08_merge_template.py` 重新生成 → `08_auto_check.py --set dev+val` 看分数 → 装机。
-
-⚠️ 三个边界：
-1. `{REASON:i<mode>}`（i = 不要思考）**管不住服务端的解析**——标签只改模板前缀，答案仍会落进 `reasoning_content`；
-   要真关思考请用客户端开关（`enable_thinking:false`）。
-2. `setup.sh` 每次都会从 GGUF **重新导出**原装模板，覆盖这一份，见 [TROUBLESHOOTING #49](TROUBLESHOOTING.md)。
-3. 同一会话里换过模式时，旧标签会以字面量留在上下文里（只剥胜出的那一个），实测多 6 个 token；换模式建议新开会话。
-
----
-
-## 1b. 引擎互切 (Switch / Rollback)
+> 下面这些命令现在跑不了（`~/cherrywork/freetoken-tools` 与 `~/.venv-lsglang` 都已删除）。
+> 保留是因为"当时怎么切"本身是记录；真要回 v4 得先重装 FreeToken。
 
 ```bash
 # switch_engine.sh 是本站自建的一键互切脚本，**不在本仓库**（流程见下方，可自行实现）
@@ -130,7 +76,7 @@ bash $S B                   # 切到 v5
 bash $S A                   # 切回 v4（回滚）
 
 # 或直接手工
-bash scripts/start_freetoken.sh   # 回滚 v4
+bash scripts/archive/start_freetoken.sh   # 回滚 v4
 bash stop_strata.sh               # 停 v5（含显存释放判据）
 ```
 
@@ -212,7 +158,7 @@ bash stop_strata.sh             # 停服务端 + 引擎，并【等显存降到 
 # ── v4（FreeToken）───────────────────────────
 ps -eo pid,args | grep '[f]t-venv/bin/ft serve'   # 先确认真实 PID（见下方自匹配警告）
 kill <pid>
-bash scripts/start_freetoken.sh        # 重启（约 40 秒）
+bash scripts/archive/start_freetoken.sh        # 重启（约 40 秒）
 ```
 
 > ⛔ **停完必须等显存真正释放再起下一个引擎。** 实测：`ft_stop.sh` 打印"干净停止"时
@@ -292,7 +238,7 @@ Anthropic 格式对应 `usage.cache_read_input_tokens`。
 ## 7. GUI / 无头主机共存 (Headless Notes)
 
 - 126GB 权重 + 专家 banks 需 ~200GB RAM——若主机有桌面环境，建议服务运行期间关闭 GUI（LightDM 等）。
-  `scripts/start_freetoken.sh` 会在检测到 lightdm 时自动停掉（`STOP_GUI=off` 可关掉该行为）
+  `scripts/archive/start_freetoken.sh` 会在检测到 lightdm 时自动停掉（`STOP_GUI=off` 可关掉该行为）
 - 远程访问：SSH local forwarding 或 loopback + 反向代理（nginx 需配 `proxy_read_timeout`，默认 60s 会掐断长请求 → 502；建议 900s）
 - 端口：只需指定 API 端口。FreeToken 内部 rendezvous 端口**自动挑空闲的**（补丁 04，
   从 API 端口+1 起向上找，被占用就顺延并打日志）；需要固定时显式设 `FT_DIST_PORT`

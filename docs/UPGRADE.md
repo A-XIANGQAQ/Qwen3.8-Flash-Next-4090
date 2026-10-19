@@ -244,7 +244,9 @@ MTP 复用基座草稿头仍然有效：`drafts accepted 79 of 94`。
    **一个张量都不用转换**（比 Unsloth 的 UD-Q4_K_XL 干净）。
 3. **GGUF 里没有 MTP 张量**（作者另有 `…-MTP-GGUF` 仓库）。按 [Strata docs/ORCA.md](https://github.com/Niko1221/Strata/blob/v0.1.45/docs/ORCA.md) 的做法复用
    基座 `mtp/rt` 草稿头，由目标模型自己校验草稿；`drafts accepted` 正常。
-4. **绝不能跑 chat 模板守卫**。模型自带 221,835 字符的模板（27 推理 + 27 指令模式 + AI Constructs），
+4. **绝不能跑 chat 模板守卫**。模型自带 221,835 字符的模板（27 推理 + 27 指令模式 + AI Constructs）。
+   > 📌 2026-10-19 起已改为**合并模板**（248,855 B，把 29 段正文并进 froggeric），见 [TEMPLATE.md](TEMPLATE.md)；
+   > 本条记录的是 10-18 换模型当时的做法。
    `iq_pack.py` 已从 GGUF 原样导出到 `pack/tokenizer/chat_template.jinja`；
    旧的 `run_strata.sh` 会用 froggeric 模板覆盖它，等于把这个模型的核心能力删掉。
    ⇒ 生产启动器已去掉守卫，备份 `run_strata.sh.bak-undq4-20261018`。
@@ -285,10 +287,10 @@ uv venv ~/ft-venv --python 3.12
 uv pip install --python ~/ft-venv "freetoken[accel]"
 
 # 2. 打三个本地补丁（未上游化；install 脚本幂等，升级后重跑即可）
-bash scripts/install_freetoken_patches.sh ~/ft-venv/lib/python3.12/site-packages
+bash scripts/archive/install_freetoken_patches.sh ~/ft-venv/lib/python3.12/site-packages
 
 # 3. 启动（脚本自带补丁自检 + 就绪等待；sudo/memlock 是保守默认，实测非必需——见 TROUBLESHOOTING #14）
-bash scripts/start_freetoken.sh
+bash scripts/archive/start_freetoken.sh
 ```
 
 `accel` extra 会拉入 flashinfer-python[cu13] 0.6.18 与 sglang-kernel 0.4.5（**注意比 v3 要求的 0.4.7 低**——
@@ -377,7 +379,7 @@ git apply patches/03_resolved_files_v0520.patch  # 2 处人工裁决差异
 python -m build --wheel --no-isolation           # SGLANG_BUILD_RUST_EXTS=none
 ```
 
-全流程见 [`scripts/build_upstream_flashnext.sh`](../scripts/build_upstream_flashnext.sh)。
+全流程见 [`scripts/archive/build_upstream_flashnext.sh`](../scripts/archive/build_upstream_flashnext.sh)。
 **三个补丁在干净 v0.5.20 上均已验证直接可打**（无 3-way、无冲突）。
 
 `03_resolved_files_v0520.patch` 覆盖两处需要判断的差异：
@@ -438,7 +440,7 @@ v2 验证（2026-09-14）：12/12 通过；decode 41.5–41.9 t/s、128K 38.7、
 ### 6.2 v1 路线
 
 Lsglang 1.4.13（guqiong96 release `lsglang-v1.4.12` 内）+ lk_moe 2.4.0，直接装 release wheel
-（`scripts/install.sh`），最省事但功能最少。启动脚本为 `scripts/start_lsglang.sh`。
+（`scripts/archive/install.sh`），最省事但功能最少。启动脚本为 `scripts/archive/start_lsglang.sh`。
 
 </details>
 
@@ -446,12 +448,12 @@ Lsglang 1.4.13（guqiong96 release `lsglang-v1.4.12` 内）+ lk_moe 2.4.0，直�
 
 | | **v5（当前，Strata）** | v4（回滚，FreeToken） | v3（sglang，历史） |
 |---|---|---|---|
-| 启动 | `run_strata.sh`——**必须用启动器**（它带 chat 模板守卫）；约 **50 秒** | `bash scripts/start_freetoken.sh`（补丁自检 + 就绪等待 + 可选关 GUI）；约 **40 秒** | `bash scripts/start_lsglang_upstream.sh`；约 5 分钟 |
+| 启动 | `run_strata.sh`——**必须用启动器**（它带 chat 模板守卫）；约 **50 秒** | `bash scripts/archive/start_freetoken.sh`（补丁自检 + 就绪等待 + 可选关 GUI）；约 **40 秒** | `bash scripts/archive/start_lsglang_upstream.sh`；约 5 分钟 |
 | 就绪判据 | 日志 `ready:` **＋破限判据行** `control vector mode = project … layers 4..44 (41 steered)` | 日志 `ready to serve`（**不能用 `/health`**） | `/health` 200 |
 | 停止 | `stop_strata.sh`（含显存释放判据） | `pkill -f "ft-venv/bin/ft serve"` | `pkill -f 'sglang serve'` |
 | 日志 | `strata-prod.log` | `/tmp/ft.log` | `/tmp/lsglang.log` |
 | 开机自启 | 无 | 无 | 无（本项目一贯手动启动） |
-| 升级/重装后必做 | **确认 [patch 07](../patches/07_strata_esp_family_whitelist.patch) 仍在**——重跑 `setup.sh` 会用上游原件覆盖 `setup.py`，ESP 静默失效 | **重打三个补丁**（`scripts/install_freetoken_patches.sh`） | 确认 tilelang 未被升到 0.1.12+、sglang-kernel ≥ 0.4.7 |
+| 升级/重装后必做 | **确认 [patch 07](../patches/07_strata_esp_family_whitelist.patch) 仍在**——重跑 `setup.sh` 会用上游原件覆盖 `setup.py`，ESP 静默失效 | **重打三个补丁**（`scripts/archive/install_freetoken_patches.sh`） | 确认 tilelang 未被升到 0.1.12+、sglang-kernel ≥ 0.4.7 |
 
 > ⚠️ **两代引擎互斥**：各占本卡 90%+ 显存，任何时刻只能活一个；**停旧后必须等 `nvidia-smi` used <1000 MiB 再起新**（见 §0.2）。
 > 若日后 `uv pip install -U freetoken`，务必重跑补丁脚本——否则服务会在下次启动时被自检拦下。
@@ -462,7 +464,7 @@ Lsglang 1.4.13（guqiong96 release `lsglang-v1.4.12` 内）+ lk_moe 2.4.0，直�
 # ── 主力回滚：v5 → v4 ────────────────────────────────
 stop_strata.sh                                            # 停 v5（含显存释放判据）
 nvidia-smi --query-gpu=memory.used --format=csv,noheader  # 轮询到 <1000 MiB 再继续
-bash scripts/start_freetoken.sh                           # 约 40 秒起来
+bash scripts/archive/start_freetoken.sh                           # 约 40 秒起来
 
 # ── 反向：v4 → v5 ───────────────────────────────────
 pkill -f "ft-venv/bin/ft serve"
@@ -470,11 +472,11 @@ nvidia-smi --query-gpu=memory.used --format=csv,noheader  # 同样要等
 bash run_strata.sh                                        # 约 50 秒起来
 
 # ── 历史路径：v4 → v3（sglang 环境、wheel、脚本全部原样保留）──
-bash scripts/start_lsglang_upstream.sh                    # 约 4-5 分钟起来
+bash scripts/archive/start_lsglang_upstream.sh                    # 约 4-5 分钟起来
 ```
 
 回滚都很快（引擎侧无需重建环境），但**每次切换都必须等显存真正释放**——`ft_stop.sh` 打印"干净停止"时
 `nvidia-smi` 仍可能显示 47,712 MiB 被占，直接起新引擎会 `cudaMalloc` OOM（见 §0.2）。
 
-本仓库已收录 v4 的完整版本快照 [`freeze-freetoken-0.1.3.txt`](freeze-freetoken-0.1.3.txt)
+本仓库已收录 v4 的完整版本快照 [`freeze-freetoken-0.1.3.txt`](archive/freeze-freetoken-0.1.3.txt)
 （102 个包，可直接 `uv pip install -r` 复现）。建议另外保留：旧启动脚本副本、以及各版本 wheel（sglang 侧）。

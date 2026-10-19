@@ -219,8 +219,8 @@ hybrid 下 GPU 73–100%、CPU 仅 1–18%，两边都没饱和。几何守卫�
 三个补丁都打在 `site-packages` 里，`uv pip install -U` 会覆盖；且 `RECORD` 不会因 patch 更新，
 所以 `pip check` 之类看不出异常，直到启动失败或行为异常才发现。
 
-**修复**：`bash scripts/install_freetoken_patches.sh <site-packages>`（幂等，可重复执行）。
-`scripts/start_freetoken.sh` 内置自检，缺补丁会**直接拒绝启动**并打印重打命令。
+**修复**：`bash scripts/archive/install_freetoken_patches.sh <site-packages>`（幂等，可重复执行）。
+`scripts/archive/start_freetoken.sh` 内置自检，缺补丁会**直接拒绝启动**并打印重打命令。
 
 ## 🟡 27. 并发上限由 mamba 槽决定，不是 mrr 数值本身
 

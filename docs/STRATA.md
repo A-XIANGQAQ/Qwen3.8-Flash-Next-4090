@@ -303,24 +303,25 @@ A smaller --prefill, or auto, keeps them all in RAM
 
 ---
 
-## 7. chat 模板必须由脚本保证
+## 7. chat 模板：谁负责它不被覆盖
 
-本站 v4 一直用 froggeric 修复版模板（见 [REPRODUCTION §5](REPRODUCTION.md)）。切换时发现 **Strata 用的是 GGUF 原装模板**，
-两者渲染同一 prompt 差了 42 个 token（2378 vs 2336）：
+**现状（2026-10-19 起）**：pack 里装的是**合并模板**（248,855 B）——
+froggeric v22.5 的渲染修复 + 模型自带的 29 段模式正文 + 自动选模式 v2。规则见 [TEMPLATE.md](TEMPLATE.md)。
 
-| 模板 | 大小 | 行数 | `reasoning_effort` |
-|---|---:|---:|---:|
-| froggeric v22.5（v4 用） | 28,234 B | 459 | 2 |
-| Strata 原装 | 9,993 B | 183 | 7 |
+| 模板 | 大小 | `reasoning_effort` 枚举 | 说明 |
+|---|---:|---:|---|
+| Strata 原装（从 GGUF 解出） | 9,993 B | 7 | 严格枚举，客户端发 `high` 会 400 |
+| 纯 froggeric v22.5 | 28,234 B | 2 | effort 别名全收，但没有模式系统 |
+| **合并模板（当前）** | **248,855 B** | 2 | froggeric + 29 段模式正文 + 自动选模式 |
 
-已把 froggeric 模板装到 Strata 的 `Strata-data/packs/<模型>/tokenizer/chat_template.jinja`，
-**渲染 token 数对齐为 2336**（与 v4 一致）。
-
-> ⚠️ 两个坑：
-> 1. **Strata 每次 `setup` 都从 GGUF 重新解出该模板**，手工替换必被覆盖 ⇒ 应用动作挂在启动器上（§8）。
-> 2. **默认思考档由模板决定**：froggeric 第 17 行 `_default_reasoning_effort = 'medium'`。
->    实测"不指定"与显式 `medium` 的思考长度逐字吻合（273 字符），`high` 为 451
->    ⇒ 切到 Strata 后**默认档没有变化**（Strata 文档说的 high 是**原装模板**的行为）。
+> ⚠️ 三个坑：
+> 1. **Strata 每次 `setup` 都从 GGUF 重新解出原装模板**，手工替换必被覆盖 ⇒ setup 之后要重装一次模板，
+>    判据 `wc -c` = **248855**（见 [REPRODUCTION §5A](REPRODUCTION.md)）。
+> 2. **别再挂"模板守卫"**：旧启动器里那条守卫会把模板强制写成纯 froggeric（28,234 B），
+>    恰好把合并模板冲掉。本站启动器已移除它（备份 `run_strata.sh.bak-undq4-20261018`），
+>    现在只靠"重装 + 判据"来保证。
+> 3. **默认思考档由模板决定**：`_default_reasoning_effort = 'medium'`（froggeric 第 17 行）。
+>    实测"不指定"与显式 `medium` 的思考长度逐字吻合（273 字符），`high` 为 451。
 
 ---
 

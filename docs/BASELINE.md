@@ -19,7 +19,7 @@
 |---|---|---|
 | 模型 | `unsloth/Qwen3.8-Flash-Next-GGUF` → **UD-Q4_K_XL**（ModelScope，111.33 GB / 4 shards） | `RadixArk/Qwen3.8-Flash-Next-NVFP4`（ModelScope master，126GB / 206 shards） |
 | 引擎 | **Strata 0.1.45**（Linux 自建，仅需 [patch 07](../patches/07_strata_esp_family_whitelist.patch) 放行 ESP；`engine/` 含 `strata` + `strata-vision` + `libstrata_kq.so`） | **FreeToken 0.1.3** + 三个本地补丁（rendezvous 自动避让 / workload / decode-interleave） |
-| 依赖锁定 | BUILD.json `archs:[89]`、CUDA 13.2 | [freeze-freetoken-0.1.3.txt](freeze-freetoken-0.1.3.txt) |
+| 依赖锁定 | BUILD.json `archs:[89]`、CUDA 13.2 | [freeze-freetoken-0.1.3.txt](archive/freeze-freetoken-0.1.3.txt) |
 | 配置定稿 | `--batch 4`、`--max-context 262144`、`--kv k8v4`、`--kv-resident 32768`、`--batch-mtp`、`--resident-budget-gib 71`、ESP 控制向量 on | `--max-running-requests 4`、`--num-tokens 265216`、`--moe-cache-rate 0.40`、`--moe-strategy offload`（显式）、`--decode-interleave-every 2`、`FREETOKEN_MAMBA_SSM_DTYPE=bfloat16` |
 
 - **口径：客户端计时**（发请求掐表 + `usage.prompt_tokens`/`completion_tokens`；用唯一随机文本保证无前缀缓存）

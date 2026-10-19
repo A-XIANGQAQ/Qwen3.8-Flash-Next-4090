@@ -36,7 +36,7 @@ uv venv ~/ft-venv --python 3.12
 uv pip install --python ~/ft-venv "freetoken[accel]"
 
 # 打三个本地补丁（幂等，可重复执行；升级 freetoken 后必须重跑）
-bash scripts/install_freetoken_patches.sh ~/ft-venv/lib/python3.12/site-packages
+bash scripts/archive/install_freetoken_patches.sh ~/ft-venv/lib/python3.12/site-packages
 
 # 验证
 ~/ft-venv/bin/ft --help
@@ -44,10 +44,10 @@ bash scripts/install_freetoken_patches.sh ~/ft-venv/lib/python3.12/site-packages
 
 `accel` extra 拉入 flashinfer-python[cu13] 0.6.18.post1 与 sglang-kernel 0.4.5。
 版本硬约束（由 freetoken 0.1.3 的元数据决定）：`torch>=2.11,<2.12`、`transformers>=5.16,<5.17`、`triton==3.6.0`。
-完整 102 包快照见 [`freeze-freetoken-0.1.3.txt`](freeze-freetoken-0.1.3.txt)。
+完整 102 包快照见 [`freeze-freetoken-0.1.3.txt`](archive/freeze-freetoken-0.1.3.txt)。
 
 > 三个补丁**均未上游化**，且都打在 site-packages 里——`uv pip install -U` 会静默覆盖它们。
-> 启动脚本 `scripts/start_freetoken.sh` 内置自检，缺补丁会直接拒绝启动。
+> 启动脚本 `scripts/archive/start_freetoken.sh` 内置自检，缺补丁会直接拒绝启动。
 
 ### 3B. 历史路线（sglang，保留可复现）
 
@@ -61,7 +61,7 @@ conda create -n lsglang-next python=3.12 && conda activate lsglang-next
 pip install torch==2.13.0 torchvision --index-url https://download.pytorch.org/whl/cu130
 pip install build setuptools-rust setuptools-scm      # 构建期依赖
 
-bash scripts/build_upstream_flashnext.sh              # 取 v0.5.20 + 打 3 个补丁 + 构建
+bash scripts/archive/build_upstream_flashnext.sh              # 取 v0.5.20 + 打 3 个补丁 + 构建
 
 pip install --no-deps <构建产物>/lsglang-1.6.0+flashnext.v0520-py3-none-any.whl
 pip install "lk_moe==2.4.1" "sglang-kernel==0.4.7" "tilelang==0.1.11" "flashinfer-python[cu13]==0.6.18"
@@ -73,7 +73,7 @@ pip install ./flash_attn-2.8.4+pr2751-cp312-cp312-linux_x86_64.whl   # SM89 必�
 **v1（Lsglang 1.4.13）= 直接装 release wheel：**
 
 ```bash
-bash scripts/install.sh
+bash scripts/archive/install.sh
 ```
 
 脚本下载两个 wheel（GitHub release `lsglang-v1.4.12` tag）、建 conda env、按序安装
@@ -148,50 +148,52 @@ modelscope download --model RadixArk/Qwen3.8-Flash-Next-NVFP4 \
   # 期望: {"index_shards": 206, "expected_shards": 206, "missing": [], "empty": []}
   ```
 
-## 5. Chat Template：froggeric v22.5（两代引擎都推荐）
+## 5. Chat Template：合并模板（froggeric v22.5 + 模型自带模式）
+
+v5 生产用的**不是纯 froggeric**，而是 [合并模板](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)
+（248,855 字节）：froggeric v22.5 的渲染修复 + 模型自带 29 段模式正文 + 自动选模式 v2。
+规则、词表、评测见 [TEMPLATE.md](TEMPLATE.md)。
+
+为什么不直接用 froggeric：它的默认 effort / think 标记仍然需要，但模型自带的 29 个模式（coder / matlock /
+house / story …）是这份 GGUF 的主要卖点，纯 froggeric 会让它们全部失效。
 
 > **模板住的位置两代不同，这决定了"怎么保证它不被覆盖"**：
-> - **v4（FreeToken）**：`<模型目录>/chat_template.jinja`——重下 checkpoint 会覆盖。
-> - **v5（Strata）**：`<Strata-data>/packs/<模型>/tokenizer/chat_template.jinja`——**每次 `setup` 都从 GGUF
->   重新解出，必覆盖** ⇒ 应用模板这件事必须挂在**启动器**上（幂等、fail-open），
->   并且**不要用 `./setup.sh` 无参起服务**。见 [TROUBLESHOOTING #32](TROUBLESHOOTING.md)。
+> - **v4（FreeToken，历史）**：`<模型目录>/chat_template.jinja`——重下 checkpoint 会覆盖。
+> - **v5（Strata，当前）**：`<Strata-data>/packs/<模型>/tokenizer/chat_template.jinja`——**每次 `setup` 都从
+>   GGUF 重新解出，必覆盖** ⇒ 装完 setup 要手工重装一次，判据是 `wc -c` = **248855**。
 
-模型自带的 RadixArk 模板对 `reasoning_effort` 严格枚举 `xhigh/medium/low`，客户端发 `high` 会 400。**推荐替换为 [froggeric/Qwen-Fixed-Chat-Templates](https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates) 顶层 `chat_template.jinja`（v22.5）**——作者声明兼容 Qwen3.8 Flash-Next，实测（2026-09）验证：effort 别名全收（`high/max/ultracode/extreme`→xhigh、`minimal`→low、`none/off`→关思考）、工具调用/中文/thinking 开关全部正常。
+### 5A. v5 的装法（当前）
 
-### 5A. v4 的装法
+```bash
+PACK=<Strata-data>/packs/<模型>/tokenizer
+
+cp "$PACK/chat_template.jinja" "$PACK/chat_template.jinja.bak-orig"      # 备份原装（约 9,993 B）
+cp qwen4090-repo/patches/08_qwen38_froggeric_v225_with_dau_modes.jinja \
+   "$PACK/chat_template.jinja"
+
+wc -c "$PACK/chat_template.jinja"                                        # 期望 248855
+curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["chat_template"]))'
+#   期望 243052（重启后）
+```
+
+**不要再挂"chat 模板守卫"**：旧启动器里的守卫会把 pack 模板强制写成纯 froggeric（28,234 B），
+反而把合并模板冲掉；本站启动器已移除该守卫（备份 `run_strata.sh.bak-undq4-20261018`）。
+
+**对齐判据**：不命中任何模式时，渲染结果与纯 froggeric 一致（同一 prompt 2,336 token）；
+命中模式时额外加上该模式正文（约 +2.1k～3.3k token）。默认 effort 是 `medium`
+（froggeric 第 17 行 `_default_reasoning_effort`，**原装模板**默认 xhigh）。**重启生效**。
+
+回滚：`cp chat_template.jinja.bak-orig chat_template.jinja`（回原装）或
+`cp chat_template.jinja.v1 chat_template.jinja`（回 v1 合并规则，246,686 B）。
+
+### 5B. v4 的装法（历史，FreeToken）
 
 ```bash
 cd /path/to/RadixArk--Qwen3.8-Flash-Next-NVFP4
-cp chat_template.jinja chat_template.jinja.bak-orig        # 备份原模板
-
-# 取 froggeric v22.5（28,234 B）——两条路任选
+cp chat_template.jinja chat_template.jinja.bak-orig
 curl -L -o chat_template.jinja \
   "https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates/resolve/main/chat_template.jinja?download=true"
-# 或从本地副本（本站做法；模板是 28KB 纯文本，走哪个源都行）
-# cp /path/to/froggeric/chat_template.jinja chat_template.jinja
 ```
-
-### 5B. v5 的装法（要挂到启动器上）
-
-```bash
-PACK=$(ls -d <Strata-data>/packs/*/tokenizer | head -1)
-
-# 手工装（一次性，setup 后会被冲掉）
-cp "$PACK/chat_template.jinja" "$PACK/chat_template.jinja.bak-orig"
-cp /path/to/froggeric/chat_template.jinja "$PACK/chat_template.jinja"
-
-# 正解：写进 run_strata.sh 开头，每次启动校正一次（幂等；模板缺失也不挡启动）
-#   _PACK_TPL=$(ls -d <Strata-data>/packs/*/tokenizer 2>/dev/null | head -1)
-#   [ -n "$_PACK_TPL" ] && bash ensure_chat_template.sh "$_PACK_TPL" || true
-```
-
-**对齐判据**：同一 prompt 渲染 **2336 token**（froggeric）vs **2378**（Strata 原装）。
-对齐后与 v4 逐字相同。
-
-注意：v22.5 默认 effort 为 `medium`（**原装模板**默认 xhigh）——客户端显式传 `reasoning_effort` 则不受影响。
-**需重启服务生效**。回滚：`cp chat_template.jinja.bak-orig chat_template.jinja`。
-
-（早期版本用手写映射补丁，已被 v22.5 原生功能取代。）
 
 ## 6. 启动 (Start)
 
@@ -212,10 +214,10 @@ tail -f strata/strata-prod.log
 否则 `cudaMalloc` OOM（[TROUBLESHOOTING #29](TROUBLESHOOTING.md)）。
 
 **v4（回滚，FreeToken）**——约 **40 秒**，就绪判据是日志行 `ready to serve`。
-编辑 `scripts/start_freetoken.sh` 顶部配置区（模型路径、`FT_BIN`、`SITE_PACKAGES`）后：
+编辑 `scripts/archive/start_freetoken.sh` 顶部配置区（模型路径、`FT_BIN`、`SITE_PACKAGES`）后：
 
 ```bash
-bash scripts/start_freetoken.sh     # 内置补丁自检 + 就绪等待
+bash scripts/archive/start_freetoken.sh     # 内置补丁自检 + 就绪等待
 ```
 
 ⚠️ **不要用 `/health` 判断 v4 就绪**——它在加载完成前就返回 200（上游 #537）。
@@ -227,7 +229,7 @@ curl -s localhost:8000/v1/chat/completions \
   -d '{"model":"<served_name>","messages":[{"role":"user","content":"你好"}],"max_tokens":64,"stream":false}'
 ```
 
-（v3，历史：`bash scripts/start_lsglang_upstream.sh`，sglang 路线约 5 分钟。）
+（v3，历史：`bash scripts/archive/start_lsglang_upstream.sh`，sglang 路线约 5 分钟。）
 
 ## 7. 成功定义 (Definition of Success)
 
