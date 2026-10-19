@@ -48,50 +48,74 @@ tail -f /tmp/ft.log
 - ⚠️ v4 脚本必须在**普通用户**的 shell 里运行（会自己 sudo 提权）。root 外壳的 cwd 会让 spawn 出的 worker 崩溃（见 TROUBLESHOOTING）
 - 启动前 v4 脚本会自检三个本地补丁是否在位——缺任何一个直接退出并打印重打命令
 
-## 1a. 模式自动选择（模板内，2026-10-18）
+## 1a. 模式自动选择（模板内，v2 · 2026-10-19）
 
-模型自带 41 个 `{REASON:xxx}` 模式（27 推理 = 7 核心 + 20 Constructs，另有 3 工具档 / 3 Qwen 档 / 8 个 x 合成档）。
-DavidAU 原装模板要用户手写标签才加载——没人愿意记 41 个名字，所以把两件事**在一份模板里**合成：
+模型自带 33 个可用 `{REASON:xxx}` 模式（29 段正文 + 4 个 effort 档）。DavidAU 原装模板要用户手写标签才加载——
+没人愿意记这些名字，所以把两件事**在一份模板里**合成：
 
 | | |
 |---|---|
 | 底子 | [froggeric v22.5](https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates)（effort 别名、think 标记、工具调用、截断、连续失败告警） |
-| 加上 | 模型自带的 29 段模式正文（逐字节照搬）+ `instruction_map` 41 键 + `{REASON:}` 解析 + 自动选择 |
-| 产物 | [`patches/08_qwen38_froggeric_v225_with_dau_modes.jinja`](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)（246,686 字节，生成器 [`patches/08_merge_template.py`](../patches/08_merge_template.py)） |
+| 加上 | 模型自带的 29 段模式正文（逐字节照搬）+ `instruction_map` 33 键 + `{REASON:}` 解析 + 自动选择 |
+| 产物 | [`patches/08_qwen38_froggeric_v225_with_dau_modes.jinja`](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)（248,855 字节；`/props` 243,052 字符） |
+| 词表 | 生成器 [`patches/08_merge_template.py`](../patches/08_merge_template.py) 里的 `MODE_LEX`；生成时同时写一份 `.lexicon.json` 供评测工具读 |
 | 装机 | `cp ... <pack>/tokenizer/chat_template.jinja`，然后重启（约 40 秒就绪） |
 
 **服务端代码一行没改**。判据：`git -C strata/Strata status --short` 里只有 `setup.py`（patch 07），`serve/` 干净。
 
-三种用法，互不排斥：
+### 判定规则（v2：三条同时满足才选）
 
-| 想要 | 做法 |
-|---|---|
-| 自动（默认） | 直接问。代码/法律/医疗/商业/调研/故事/提示词/喜剧/头脑风暴/证明/讲解 等关键词命中就加载对应模式 |
-| 手动 | 消息里写 `{REASON:coder} 你的问题`——标签优先，自动不再插手 |
-| 不加任何系统提示 | `{REASON:off}` |
+1. **分数 ≥ 2**。词表分三层：`3` = 无歧义（`traceback`/`代码`/`竞业`/`体检`/`第一性原理`…），`2` = 主题词，`1` = 弱提示。
+2. **边际胜出**：最高分必须**严格高于**第二名（平分 → 不选）。这一条取代了 v1 的固定优先级——v1 里 `matlock` 4 分
+   会输给 `coder` 2 分，只要 coder 排在前面。
+3. **判不准就不选**：回落到 froggeric 默认（`medium`），绝不硬猜。误套 persona 的代价远大于不套。
 
-自动规则：**强信号 1 个即中，普通信号要 2 个独立命中**，按「具体 → 一般」排序（coder / matlock / house /
-business / spoon / story / prompt / comedy / brainstorm / logic / teacher）。
-判定看的是**整个会话的 user 文本**（最近 4000 字符），所以一个会话里一旦命中就粘住，不会来回翻、不吃缓存。
+匹配细节：**ASCII 单词走词边界**（先把中英文标点拍平成空格，`trust` 不会命中 `rust`、`pipeline` 不会命中 `pip`）；
+中文词与 ```` ``` ```` 走子串。只看 **user 消息**——不扫 system：一段真实的英文 agent 系统提示（3,421 字符）
+单独就能打 `coder 4 / prompt 2`，扫进去等于把模式钉死在 coder，而且会随客户端提示词漂移。
 
-实测 2026-10-18（同一台 4090 / Strata 0.1.45）：
+判定看的是**整个会话的 user 文本**（最近 4000 字符），所以一个会话里一旦命中就粘住，不会来回翻、不吃前缀缓存。
+
+### 实测（2026-10-19，同一台 4090 / Strata 0.1.45）
+
+| 集合 | 规模 | 命中 | 错选 | 弃权 | 准确率 |
+|---|---:|---:|---:|---:|---:|
+| dev（调参集） | 73 | 70 | **0** | 3 | **95.9%** |
+| val（每轮检查） | 30 | 27 | **0** | 3 | **90.0%** |
+| test（锁定，只跑一次） | 40 | 29 | **0** | 11 | **72.5%** |
+
+**没达到计划里「test ≥ 90%」的目标**。全部错例都是弃权，没有一条选错模式；差距来自词表仍不覆盖手写改写——
+`git rebase`、`长期头痛`、`客户`、`挂号`、`营销`(只有 1 分)、`融资`(只有 1 分) 这类。要继续提升必须先写**新的**锁定
+测试集：现有的 test 已经被看过，不能再当验收集用。
+
+线上 spot check（重启后，`max_tokens=1` 读 `prompt_tokens`）：
 
 | 请求 | prompt tokens | 模式 |
 |---|---:|---|
-| `你好` | **11** | 无（froggeric 默认 medium，连系统提示都不发） |
-| `帮我写一个 Python 快速排序，带单元测试` | **2,721** | coder（自动） |
-| 同会话追问 `继续` | 2,737 | coder（粘住） |
-| `解释一下什么是熵，通俗一点` | 3,124 | teacher（自动） |
-| `这个竞业限制条款在劳动法下有效吗？` | 2,310 | matlock（自动） |
-| `{REASON:pkd} 现实是什么` | 2,063 | pkd（手动） |
-| `{REASON:off} 你好` | 11 | 无 |
-| 关思考 + 编程题 | 2,723 | coder，回复里没有思考段 |
+| `你好` | 11 | 不选（连系统提示都不发） |
+| `讲个笑话` | **2,847** | comedy（v1 时是 13 = 不选） |
+| `这个 bug 的法条依据是什么` | 17 | 不选（双主题，弃权） |
+| `I trust you, this pipeline is rapid` | 18 | 不选（词边界生效） |
+| `diagnose this segfault` | 2,717 | coder |
 
-离线 24 个用例（11 领域 + 13 个必须不触发）**全对**，且是同一份模板渲染出来的，不是别的层代劳。
+渲染成本：v1 0.375 ms → v2 **0.446 ms**（200 次均值，同一台机器）。贵的那 0.07 ms 就是多算 200 个词的边界匹配。
 
-⚠️ 两个边界：① `{REASON:i<mode>}`（i = 不要思考）**管不住服务端的解析**——标签只改模板的前缀，服务端仍按
-「思考中」解析回复，答案会落进 `reasoning_content`；要真关思考请用客户端的开关（`enable_thinking:false`），
-那条路径实测正常。② `setup.sh` 每次都会从 GGUF **重新导出**原装模板，覆盖这一份，见[TROUBLESHOOTING #49](TROUBLESHOOTING.md)。
+### 评测工具
+
+| 工具 | 用途 |
+|---|---|
+| [`patches/08_auto_check.py`](../patches/08_auto_check.py) | **渲染真实模板**认模式（不写 Python 复刻）：`--set dev\|val\|test\|dev+val`、`--explain` 打印分数、`--case "…"` 单条排查；镜像与模板不一致会报 `[DRIFT]` |
+| [`patches/08_autolex_gen.py`](../patches/08_autolex_gen.py) | 用本地模型按模式生成改写语料（每条请求带 `{REASON:ioff}`——不关模式的话，模式正文会把「每行一条问题」的输出格式污染成 `⎔⎔⎔ teacher ⎔`） |
+| [`patches/08_autolex_mine.py`](../patches/08_autolex_mine.py) | 挖 2–4 字短语 + 英文词，按 `lift = P(词\|本模式)/P(词\|其他)` 排序；带**左右边界熵**过滤，去掉 `看看这段`/`该怎` 这类碎片 |
+
+改词表的顺序：`08_autolex_gen.py` 生成语料 → `08_autolex_mine.py` 出候选 → 人工复核 → 改 `MODE_LEX` →
+`08_merge_template.py` 重新生成 → `08_auto_check.py --set dev+val` 看分数 → 装机。
+
+⚠️ 三个边界：
+1. `{REASON:i<mode>}`（i = 不要思考）**管不住服务端的解析**——标签只改模板前缀，答案仍会落进 `reasoning_content`；
+   要真关思考请用客户端开关（`enable_thinking:false`）。
+2. `setup.sh` 每次都会从 GGUF **重新导出**原装模板，覆盖这一份，见 [TROUBLESHOOTING #49](TROUBLESHOOTING.md)。
+3. 同一会话里换过模式时，旧标签会以字面量留在上下文里（只剥胜出的那一个），实测多 6 个 token；换模式建议新开会话。
 
 ---
 

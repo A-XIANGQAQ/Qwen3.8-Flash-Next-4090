@@ -523,9 +523,9 @@ systemd-run --user --unit=strata-prod --collect \
 
 ```bash
 wc -c <pack>/tokenizer/chat_template.jinja
-#   合并模板 246686   |   froggeric 28234   |   原装 226745
+#   v2 合并模板 248855 | v1 合并模板 246686 | froggeric 28234 | 原装 226745
 curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["chat_template"]))'
-#   合并模板 241214
+#   v2 243052 | v1 241214
 ```
 
 恢复：
@@ -535,6 +535,43 @@ cp qwen4090-repo/patches/08_qwen38_froggeric_v225_with_dau_modes.jinja \
    strata-data/packs/<模型>/tokenizer/chat_template.jinja
 # 然后重启（约 40 秒就绪）
 ```
+
+---
+
+## 🔴 50. 怎么判断"自动选模式"到底有没有生效
+
+症状通常不是报错，而是"感觉怪"：该用 coder 的时候答得很泛，或者随便聊两句突然被套上豪斯医生的人格。
+
+判据按顺序：
+
+```bash
+# 1. 模板对不对（不是原装、不是 froggeric）
+wc -c <pack>/tokenizer/chat_template.jinja          # 248855 = v2
+curl -s 127.0.0.1:8000/props | grep -c 'dau-modes-v2'   # 1
+
+# 2. 规则对不对（离线，渲染真实模板，不碰 GPU）
+python3 qwen4090-repo/patches/08_auto_check.py --set dev+val
+#   期望 dev 95.9% / val 90.0% / 错选 0
+
+# 3. 线上单条
+python3 qwen4090-repo/patches/08_auto_check.py --case "讲个笑话"
+#   输出 mode : comedy，scores 里 comedy 2、其余 0
+
+# 4. 线上真实请求（prompt_tokens 是硬证据）
+curl -s 127.0.0.1:8000/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"Qwen3.8-Flash-Next","messages":[{"role":"user","content":"讲个笑话"}],"max_tokens":1}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["usage"]["prompt_tokens"])'
+#   约 2847 = comedy 正文进去了；11 = 完全没选模式
+```
+
+常见误判：
+
+| 现象 | 真相 |
+|---|---|
+| 问技术问题没进 coder | 可能是**故意的弃权**（`top1≥2` 且领先第二名才算命中）。看 `--case` 的 scores，别猜 |
+| 一句话被套上 persona | 词表里某个强信号词误伤（如 `代码` 出现在闲聊里）。给 `--explain` 看是哪个词，再决定删/降权 |
+| 换了词表却没变化 | 忘了重新生成模板或没重启；`/props` 里的版本串能分辨 |
+| 同一会话里风格突然变 | 自动判定看**整段对话**，中途继续追加内容会累计分数；换模式请新开会话或敲 `{REASON:xxx}` |
 
 ---
 

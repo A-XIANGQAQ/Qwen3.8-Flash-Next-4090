@@ -1,8 +1,8 @@
 {#- ------------------------------------------------------------------------------------------- -#}
-{#- DavidAU mode system, merged into froggeric v22.5 (2026-10-18).  The 41 {REASON:} modes of    -#}
+{#- DavidAU mode system, merged into froggeric v22.5 (2026-10-18).  The 33 {REASON:} modes of    -#}
 {#- DavidAU/Qwen3.8-Flash-Next-GSQ-RCO-GGUF, kept verbatim; froggeric's effort/think/tool logic   -#}
 {#- is untouched.  A mode is loaded by a {REASON:<mode>} tag (i prefix = no thinking) or chosen    -#}
-{#- automatically from the conversation's user messages.                                          -#}
+{#- automatically from the conversation's user messages (v2: margin rule, word boundaries).       -#}
 {#- ------------------------------------------------------------------------------------------- -#}
 {%- set system_instruction_DAU -%}
 [SYSTEM OPERATING SYSTEM: OMNI-DIMENSIONAL QUANTUM FRAMEWORK v5.0]
@@ -3000,7 +3000,7 @@ Tr:25/100 | SF:95/100 | Alt:20/100 | Comp:100/100 | Mod:10/100 | TM:85/100
     'matlock': system_instruction_matlock_DAU,
     'house': system_instruction_house_DAU,
 } %}
-{%- set template_version = "qwen3.8-froggeric-v22.5+dau-modes" %}
+{%- set template_version = "qwen3.8-froggeric-v22.5+dau-modes-v2" %}
 {%- set _tool_format = tool_call_format if tool_call_format is defined else 'xml' %}
 {%- set image_count = namespace(value=0) %}
 {%- set video_count = namespace(value=0) %}
@@ -3081,7 +3081,7 @@ Tr:25/100 | SF:95/100 | Alt:20/100 | Comp:100/100 | Mod:10/100 | TM:85/100
     {%- endif %}
 {%- endfor %}
 {%- set reasoning_instructions = '' %}
-{#- DavidAU modes: an explicit {REASON:<mode>} tag wins; otherwise pick one from the conversation (or nothing) -#}
+{#- DavidAU modes: an explicit {REASON:<mode>} tag wins; otherwise score the conversation's user text -#}
 {%- set _mode = namespace(name='', tag='') %}
 {%- for _m in messages %}
     {%- set _ts = namespace(text='') %}
@@ -3120,29 +3120,37 @@ Tr:25/100 | SF:95/100 | Alt:20/100 | Comp:100/100 | Mod:10/100 | TM:85/100
         {%- endif %}
     {%- endfor %}
     {%- set _t = (_u.text | lower)[-4000:] %}
+    {%- set _n = _t | replace('.', ' ') | replace(',', ' ') | replace(';', ' ') | replace(':', ' ') | replace('!', ' ') | replace('?', ' ') | replace('/', ' ') | replace('\\', ' ') | replace('|', ' ') | replace('(', ' ') | replace(')', ' ') | replace('[', ' ') | replace(']', ' ') | replace('{', ' ') | replace('}', ' ') | replace('<', ' ') | replace('>', ' ') | replace('"', ' ') | replace("'", ' ') | replace('#', ' ') | replace('@', ' ') | replace('$', ' ') | replace('%', ' ') | replace('^', ' ') | replace('&', ' ') | replace('+', ' ') | replace('=', ' ') | replace('~', ' ') | replace('-', ' ') | replace('_', ' ') | replace('*', ' ') | replace('，', ' ') | replace('。', ' ') | replace('？', ' ') | replace('！', ' ') | replace('：', ' ') | replace('；', ' ') | replace('（', ' ') | replace('）', ' ') | replace('【', ' ') | replace('】', ' ') | replace('「', ' ') | replace('」', ' ') | replace('、', ' ') | replace('·', ' ') | replace('…', ' ') | replace('“', ' ') | replace('”', ' ') | replace('‘', ' ') | replace('’', ' ') | replace('《', ' ') | replace('》', ' ') %}
+    {%- set _n = ' ' ~ _n ~ ' ' %}
     {%- set _h = namespace(coder=0, matlock=0, house=0, business=0, spoon=0, story=0, prompt=0, comedy=0, brainstorm=0, logic=0, teacher=0) %}
-    {%- for _w in ['```', 'traceback', 'segfault', '代码', '报错'] %}{%- if _w in _t %}{%- set _h.coder = _h.coder + 2 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['函数', '编译', '重构', '单元测试', 'bug', 'api', '接口', '脚本', '算法', '数据结构', '部署', '依赖', 'python', 'javascript', 'typescript', 'golang', 'rust', 'java', 'sql', 'regex', 'docker', 'npm', 'pip', 'cargo', 'cuda', 'pytorch', '异常', '变量', '数组', '字符串'] %}{%- if _w in _t %}{%- set _h.coder = _h.coder + 1 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['诉讼', '判例', '竞业'] %}{%- if _w in _t %}{%- set _h.matlock = _h.matlock + 2 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['法律', '法规', '法条', '合同', '条款', '仲裁', '合规', '侵权', '违约', '劳动法', '律师'] %}{%- if _w in _t %}{%- set _h.matlock = _h.matlock + 1 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['诊断', '病历'] %}{%- if _w in _t %}{%- set _h.house = _h.house + 2 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['症状', '病因', '化验', '检查报告', '指标异常', '用药', '临床', '头晕', '疼痛', '发烧'] %}{%- if _w in _t %}{%- set _h.house = _h.house + 1 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['商业模式', '创业'] %}{%- if _w in _t %}{%- set _h.business = _h.business + 2 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['商业', '市场', '营销', '定价', '营收', '利润', '获客', '融资', 'bp', '竞品', '供应链', '加盟', '开店', '变现', '生意'] %}{%- if _w in _t %}{%- set _h.business = _h.business + 1 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['研究现状', '证据链', '白皮书'] %}{%- if _w in _t %}{%- set _h.spoon = _h.spoon + 2 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['调研', '综述', '文献', '深度报告', '系统性', '横向对比'] %}{%- if _w in _t %}{%- set _h.spoon = _h.spoon + 1 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['故事', '小说', '剧本'] %}{%- if _w in _t %}{%- set _h.story = _h.story + 2 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['散文', '叙事', '人物设定', '对白', '世界观', '情节', '写一篇', '写个'] %}{%- if _w in _t %}{%- set _h.story = _h.story + 1 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['提示词', 'prompt'] %}{%- if _w in _t %}{%- set _h.prompt = _h.prompt + 2 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['系统提示', '指令模板', '角色设定'] %}{%- if _w in _t %}{%- set _h.prompt = _h.prompt + 1 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['段子', '脱口秀'] %}{%- if _w in _t %}{%- set _h.comedy = _h.comedy + 2 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['笑话', '吐槽', '搞笑', '梗', '相声'] %}{%- if _w in _t %}{%- set _h.comedy = _h.comedy + 1 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['头脑风暴', '点子'] %}{%- if _w in _t %}{%- set _h.brainstorm = _h.brainstorm + 2 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['创意', '想法', '灵感', '命名', '起名'] %}{%- if _w in _t %}{%- set _h.brainstorm = _h.brainstorm + 1 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['证明', '反例', '第一性原理', '形式化'] %}{%- if _w in _t %}{%- set _h.logic = _h.logic + 2 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['推导', '是否成立', '逻辑', '漏洞', '自相矛盾'] %}{%- if _w in _t %}{%- set _h.logic = _h.logic + 1 %}{%- endif %}{%- endfor %}
-    {%- for _w in ['解释', '讲清楚', '通俗', '入门', '教我', '什么是', '原理', '怎么理解', '举例说明'] %}{%- if _w in _t %}{%- set _h.teacher = _h.teacher + 1 %}{%- endif %}{%- endfor %}
-    {%- if _h.coder >= 2 %}{%- set _mode.name = 'coder' %}{%- elif _h.matlock >= 2 %}{%- set _mode.name = 'matlock' %}{%- elif _h.house >= 2 %}{%- set _mode.name = 'house' %}{%- elif _h.business >= 2 %}{%- set _mode.name = 'business' %}{%- elif _h.spoon >= 2 %}{%- set _mode.name = 'spoon' %}{%- elif _h.story >= 2 %}{%- set _mode.name = 'story' %}{%- elif _h.prompt >= 2 %}{%- set _mode.name = 'prompt' %}{%- elif _h.comedy >= 2 %}{%- set _mode.name = 'comedy' %}{%- elif _h.brainstorm >= 2 %}{%- set _mode.name = 'brainstorm' %}{%- elif _h.logic >= 2 %}{%- set _mode.name = 'logic' %}{%- elif _h.teacher >= 2 %}{%- set _mode.name = 'teacher' %}{%- endif %}
+    {%- for _w in ['traceback', 'segfault', 'python', 'javascript', 'typescript', 'golang', 'rust', 'java', 'sql', 'docker', 'cargo', 'cuda', 'pytorch', 'nginx'] %}{%- if ' ' ~ _w ~ ' ' in _n %}{%- set _h.coder = _h.coder + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['```', '代码', '报错', '部署', '日志', '内存', '前端'] %}{%- if _w in _t %}{%- set _h.coder = _h.coder + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['bug', 'api', 'npm', 'pip', 'regex'] %}{%- if ' ' ~ _w ~ ' ' in _n %}{%- set _h.coder = _h.coder + 1 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['函数', '编译', '重构', '单元测试', '接口', '脚本', '算法', '数据结构', '依赖', '异常', '变量', '数组', '字符串', '编程', '程序', '配置', '端口', '重启'] %}{%- if _w in _t %}{%- set _h.coder = _h.coder + 1 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['诉讼', '判例', '竞业', '仲裁', '离职', '赔偿', '辞退', '起诉', '法院', '索赔'] %}{%- if _w in _t %}{%- set _h.matlock = _h.matlock + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['法律', '法规', '法条', '合同', '条款', '合规', '侵权', '违约', '劳动法', '律师', '工资', '补偿', '时效'] %}{%- if _w in _t %}{%- set _h.matlock = _h.matlock + 1 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['诊断', '病历', '体检', '失眠', '结节', '睡眠'] %}{%- if _w in _t %}{%- set _h.house = _h.house + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['症状', '病因', '化验', '检查报告', '指标异常', '用药', '临床', '头晕', '疼痛', '发烧', '感冒', '咳嗽', '头疼', '缓解'] %}{%- if _w in _t %}{%- set _h.house = _h.house + 1 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['商业模式', '创业', '定价', '回本'] %}{%- if _w in _t %}{%- set _h.business = _h.business + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['bp'] %}{%- if ' ' ~ _w ~ ' ' in _n %}{%- set _h.business = _h.business + 1 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['商业', '市场', '营销', '营收', '利润', '获客', '融资', '竞品', '供应链', '加盟', '开店', '变现', '生意', '成本', '降价', '咖啡店', '奶茶店'] %}{%- if _w in _t %}{%- set _h.business = _h.business + 1 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['研究现状', '证据链', '白皮书', '梳理', '脉络'] %}{%- if _w in _t %}{%- set _h.spoon = _h.spoon + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['调研', '综述', '文献', '深度报告', '系统性', '横向对比', '行业', '研究'] %}{%- if _w in _t %}{%- set _h.spoon = _h.spoon + 1 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['故事', '小说', '剧本', '短篇', '独白', '剧情', '反派', '女主'] %}{%- if _w in _t %}{%- set _h.story = _h.story + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['散文', '叙事', '人物设定', '对白', '世界观', '情节', '写一篇', '写个', '主角', '台词', '角色', '描写', '大纲', '内心'] %}{%- if _w in _t %}{%- set _h.story = _h.story + 1 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['prompt'] %}{%- if ' ' ~ _w ~ ' ' in _n %}{%- set _h.prompt = _h.prompt + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['提示词', '输出格式', '约束'] %}{%- if _w in _t %}{%- set _h.prompt = _h.prompt + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['系统提示', '指令模板', '角色设定', '稳定', '固定', '输出', '指令'] %}{%- if _w in _t %}{%- set _h.prompt = _h.prompt + 1 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['段子', '脱口秀', '笑话', '吐槽', '幽默', '谐音梗'] %}{%- if _w in _t %}{%- set _h.comedy = _h.comedy + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['搞笑', '梗', '相声'] %}{%- if _w in _t %}{%- set _h.comedy = _h.comedy + 1 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['头脑风暴', '点子', '构思'] %}{%- if _w in _t %}{%- set _h.brainstorm = _h.brainstorm + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['创意', '想法', '灵感', '命名', '起名', '主打', '活动', '新开'] %}{%- if _w in _t %}{%- set _h.brainstorm = _h.brainstorm + 1 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['证明', '反例', '第一性原理', '形式化', '论证', '悖论', '谬误'] %}{%- if _w in _t %}{%- set _h.logic = _h.logic + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['推导', '是否成立', '逻辑', '漏洞', '自相矛盾', '推理', '前提', '反驳', '因果'] %}{%- if _w in _t %}{%- set _h.logic = _h.logic + 1 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['科普'] %}{%- if _w in _t %}{%- set _h.teacher = _h.teacher + 2 %}{%- endif %}{%- endfor %}
+    {%- for _w in ['解释', '讲清楚', '通俗', '入门', '教我', '什么是', '原理', '怎么理解', '举例说明', '讲讲', '说说', '讲解', '定义', '区别'] %}{%- if _w in _t %}{%- set _h.teacher = _h.teacher + 1 %}{%- endif %}{%- endfor %}
+    {%- set _p = [('coder', _h.coder), ('matlock', _h.matlock), ('house', _h.house), ('business', _h.business), ('spoon', _h.spoon), ('story', _h.story), ('prompt', _h.prompt), ('comedy', _h.comedy), ('brainstorm', _h.brainstorm), ('logic', _h.logic), ('teacher', _h.teacher)] | sort(attribute=1, reverse=true) %}
+    {%- if _p[0][1] >= 2 and _p[0][1] - _p[1][1] >= 1 %}{%- set _mode.name = _p[0][0] %}{%- endif %}
 {%- endif %}
 {%- if _mode.name %}
     {%- set reasoning_instructions = instruction_map.get(_mode.name, '') %}
