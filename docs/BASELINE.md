@@ -5,6 +5,8 @@
 > 最早的 prefill 绝对数字（8k ~1195 t/s、256K ~1277 t/s）来自 2026-08-30 参数扫描期，已被空闲窗口复测取代；
 > 2026-09-23 的 sglang v3 复测给出 8k ≈ 1968–1994、254K ≈ 1710 t/s。
 > **2026-09-24 → 10-13 引擎为 FreeToken（v4）**；**2026-10-13 起引擎为 Strata（v5）**，主表见下方「主结果 · v5」。
+> 主表的分组是 **v5.1（0.1.45 + UD-Q4_K_XL）**，作为历史基线保留；**当前生产是 v5.3（0.2.2 服务端 + 0.1.47 引擎 + DavidAU IQ3_S）**，
+> 换模型与换引擎的增量见 [UPGRADE §0c / §0d](UPGRADE.md)。
 > v3（sglang）数据见 [升级文档 §5.4](UPGRADE.md)。
 >
 > ⚠️ **v5 只有短上下文数据**：长上下文（128K / 256K）配置与显存账支持，但**没在真实长文下跑过**；
@@ -15,7 +17,7 @@
 同一台主机：**单 RTX 4090 48GB（SM89）+ 38 核 CPU + 247GB RAM**。两代引擎跑同一个模型家族，
 差别在**权重格式 + 引擎**：
 
-| | **v5.1（当前，2026-10-18 起）** | v4（2026-09-24 起，回滚路径） |
+| | **v5.1 基线（2026-10-18，已被 v5.2/v5.3 取代）** | v4（2026-09-24 起，回滚路径） |
 |---|---|---|
 | 模型 | `unsloth/Qwen3.8-Flash-Next-GGUF` → **UD-Q4_K_XL**（ModelScope，111.33 GB / 4 shards） | `RadixArk/Qwen3.8-Flash-Next-NVFP4`（ModelScope master，126GB / 206 shards） |
 | 引擎 | **Strata 0.1.45**（Linux 自建，仅需 [patch 07](../patches/07_strata_esp_family_whitelist.patch) 放行 ESP；`engine/` 含 `strata` + `strata-vision` + `libstrata_kq.so`） | **FreeToken 0.1.3** + 三个本地补丁（rendezvous 自动避让 / workload / decode-interleave） |

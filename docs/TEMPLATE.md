@@ -1,29 +1,30 @@
-# 合并模板（patch 08）：模式自动选择 v2
+# 合并模板（patch 08）：模式自动选择 v3
 
 一份 `chat_template.jinja` 同时干两件事：保持 froggeric v22.5 的渲染修复（effort 别名、think 标记、工具调用、
-截断、连续失败告警），并把模型自带的 29 段模式正文接进来、由模板自己挑模式。**服务端代码一行没改。**
+截断、连续失败告警），并把模型自带的 29 段模式正文和 8 个 xhigh 组合键接进来、由模板自己挑模式。
+**服务端代码一行没改。**
 
 为什么把它单列一篇：这是本仓库唯一改"模型行为"而不是"部署"的部分，逻辑全在一份 Jinja 里，改它要跑评测。
 
-- 模板：[`patches/08_qwen38_froggeric_v225_with_dau_modes.jinja`](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)（248,855 字节）
+- 模板：[`patches/08_qwen38_froggeric_v225_with_dau_modes.jinja`](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)（249,545 字节）
 - 生成器：[`patches/08_merge_template.py`](../patches/08_merge_template.py)（`MODE_LEX` 就是词表）
 - 词表快照：[`patches/08_qwen38_froggeric_v225_with_dau_modes.lexicon.json`](../patches/08_qwen38_froggeric_v225_with_dau_modes.lexicon.json)
 - 评测/挖词：[`08_auto_check.py`](../patches/08_auto_check.py)、[`08_autolex_gen.py`](../patches/08_autolex_gen.py)、[`08_autolex_mine.py`](../patches/08_autolex_mine.py)，用法见 [运维 §1a](OPERATIONS.md)
 
 ---
 
-模型自带 33 个可用 `{REASON:xxx}` 模式（29 段正文 + 4 个 effort 档）。DavidAU 原装模板要用户手写标签才加载——
+模型自带 41 个可用 `{REASON:xxx}` 键（29 段模式正文 + 8 个 xhigh 组合 + 4 个 effort 档）。DavidAU 原装模板要用户手写标签才加载——
 没人愿意记这些名字，所以把两件事**在一份模板里**合成：
 
 | | |
 |---|---|
 | 底子 | [froggeric v22.5](https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates)（effort 别名、think 标记、工具调用、截断、连续失败告警） |
-| 加上 | 模型自带的 29 段模式正文（逐字节照搬）+ `instruction_map` 33 键 + `{REASON:}` 解析 + 自动选择 |
-| 产物 | [`patches/08_qwen38_froggeric_v225_with_dau_modes.jinja`](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)（248,855 字节；`/props` 243,052 字符） |
+| 加上 | 模型自带的 29 段模式正文（逐字节照搬）+ 8 个 xhigh 组合键（`_mode_xhigh + _xsep + 正文`）+ `instruction_map` 41 键 + `{REASON:}` 解析 + 自动选择 |
+| 产物 | [`patches/08_qwen38_froggeric_v225_with_dau_modes.jinja`](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)（249,545 字节；`/props` 243,742 字符） |
 | 词表 | 生成器 [`patches/08_merge_template.py`](../patches/08_merge_template.py) 里的 `MODE_LEX`；生成时同时写一份 `.lexicon.json` 供评测工具读 |
 | 装机 | `cp ... <pack>/tokenizer/chat_template.jinja`，然后重启（约 40 秒就绪） |
 
-**服务端代码一行没改**。判据：`git -C strata/Strata status --short` 里只有 `setup.py`（patch 07），`serve/` 干净。
+**服务端代码一行没改**。判据：`diff -r strata/Strata-0.2.2/serve <官方 v0.2.2 解压包>/serve` 为空；本地没有任何 `serve/` 补丁。
 
 ## 判定规则（v2：三条同时满足才选）
 
@@ -38,7 +39,32 @@
 
 判定看的是**整个会话的 user 文本**（最近 4000 字符），所以一个会话里一旦命中就粘住，不会来回翻、不吃前缀缓存。
 
-## 实测（2026-10-19，同一台 4090 / Strata 0.1.45）
+## xhigh 组合键（v3 补回）
+
+模型卡和模板内置的 help 菜单都列了 8 个组合模式：`xomni / xdeeptree / xhyper / xsocrates / xlogic / xhelp /
+xeinstein / xspoon`，语义是「Qwen 的 xhigh 指令 + 该模式的正文」。v2 的 `instruction_map` 只搬了 29 段正文，
+这 8 个键**被静默丢弃**——用户照着模型卡写 `{REASON:xomni}` 时模板不认识，等于没写（`08_auto_check --case` 会报 `(none)`）。
+
+v3 按 DavidAU 原装的拼法补回（分隔句也逐字照搬，只把原文的 `guidelinges` 拼写修正为 `guidelines`）：
+
+```jinja
+{%- set _xsep = '\n\nIn addition to following "xhigh" directives, use the following directives, instructions and guidelines to process the user prompt and output the final answer:\n' %}
+'xomni': _mode_xhigh + _xsep + system_instruction_DAU,
+```
+
+它们是**显式专用**：不进 `AUTO_ORDER` / `MODE_LEX`，自动选择永远不会挑组合键（否则会和基础模式的词表分数互相干扰）。
+线上实测（同一句 `你好` 的 `prompt_tokens`）：
+
+| 请求 | prompt tokens | 说明 |
+|---|---:|---|
+| `{REASON:omni} 你好` | 959 | 基础模式正文 |
+| `{REASON:xomni} 你好` | **1,027** | +68 = xhigh 指令 + 分隔句 |
+| `{REASON:ixspoon} 你好` | 908 | instruct 版（`i` 前缀） |
+
+`08_auto_check.py` 的识别顺序也改了：先认「xhigh 句 + 分隔句 + 正文头 80 字符」，再认普通正文——否则
+`xomni` 会被误报成 `xhigh` 或 `omni`。
+
+## 实测（2026-10-19 定规则；2026-10-22 在 0.2.2/0.1.47 上复核，同一台 4090）
 
 | 集合 | 规模 | 命中 | 错选 | 弃权 | 准确率 |
 |---|---:|---:|---:|---:|---:|
@@ -50,6 +76,8 @@
 `git rebase`、`长期头痛`、`客户`、`挂号`、`营销`(只有 1 分)、`融资`(只有 1 分) 这类。要继续提升必须先写**新的**锁定
 测试集：现有的 test 已经被看过，不能再当验收集用。
 
+2026-10-22 加 xhigh 组合键后重跑 dev/val：命中数与错选**完全不变**（70/73、27/30，0 错选，`[DRIFT]` 0 条）。
+
 线上 spot check（重启后，`max_tokens=1` 读 `prompt_tokens`）：
 
 | 请求 | prompt tokens | 模式 |
@@ -59,6 +87,7 @@
 | `这个 bug 的法条依据是什么` | 17 | 不选（双主题，弃权） |
 | `I trust you, this pipeline is rapid` | 18 | 不选（词边界生效） |
 | `diagnose this segfault` | 2,717 | coder |
+| `{REASON:xomni} 你好` | 1,027 | xomni（v3 补回的组合键） |
 
 渲染成本：v1 0.375 ms → v2 **0.446 ms**（200 次均值，同一台机器）。贵的那 0.07 ms 就是多算 200 个词的边界匹配。
 
@@ -75,7 +104,7 @@
 
 ⚠️ 三个边界：
 1. `{REASON:i<mode>}`（i = 不要思考）**管不住服务端的解析**——标签只改模板前缀，答案仍会落进 `reasoning_content`；
-   要真关思考请用客户端开关（`enable_thinking:false`）。
+   要真关思考请用客户端开关（`enable_thinking:false`）；2026-10-22 实测 `{REASON:ixspoon}` 仍返回 `reasoning_content`。
 2. `setup.sh` 每次都会从 GGUF **重新导出**原装模板，覆盖这一份，见 [TROUBLESHOOTING #49](TROUBLESHOOTING.md)。
 3. 同一会话里换过模式时，旧标签会以字面量留在上下文里（只剥胜出的那一个），实测多 6 个 token；换模式建议新开会话。
 
@@ -100,7 +129,8 @@ python3 08_auto_check.py --template /tmp/new.jinja --set dev+val  # 5. 评测
 | 版本 | 日期 | 变化 | dev 准确率 |
 |---|---|---|---:|
 | v1 | 2026-10-18 | 裸子串 + 固定优先级（强 2 分 / 普通 1 分，第一个过线即选） | 82.2%（73 条） |
-| **v2** | 2026-10-19 | 三层权重 + ASCII 词边界 + 边际胜出（弃权）+ 词表从语料挖 | **95.9%（73 条）** |
+| v2 | 2026-10-19 | 三层权重 + ASCII 词边界 + 边际胜出（弃权）+ 词表从语料挖 | **95.9%（73 条）** |
+| **v3** | 2026-10-22 | 补回 8 个 xhigh 组合键（显式专用），规则/词表**一字未动** | 95.9%（73 条，不变） |
 
 v1 的两个硬伤：`trust` 命中 `rust`、`pipeline` 命中 `pip`（无边界）；`matlock` 4 分会被排在前面且刚过线的
 `coder` 2 分抢走（固定优先级）。v2 的"边际胜出"就是修第二个：分数高者赢，平分则弃权。

@@ -83,9 +83,33 @@ head_dim=256 的 128×64 tile 超 4090 shared memory，PR2751 改 128×32。
 
 </details>
 
-### 3C. v5：Strata（Linux 必须自建）
+### 3C. v5.3：Strata（官方预编译引擎 + 源码服务端）
 
-Strata 的 release **只有 Windows 二进制**（`strata-windows-x64*.zip`），Linux 没有预编译包。
+0.2.0 起上游发 **Linux 预编译引擎**（0.1.47 包 arch = sm_75/86/89/120），不再需要自建。
+仍**不跑 `setup.sh`**：它会重导模板、重写 run config，0.1.44+ 还有 #2902 删分片的风险。
+
+```bash
+# 服务端源码（tag v0.2.2）
+mkdir -p strata/Strata-0.2.2
+curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.2.tar.gz \
+  | tar -xz -C strata/Strata-0.2.2 --strip-components=1
+
+# 官方引擎包（sha256 必须等于签名 feed：
+#   45a6df98aaf4b6b7c05087a4ab428be8df478ddcc07193a13cbaab312b85895e）
+gh release download v0.2.2 --repo Niko1221/Strata \
+  -p 'strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
+mkdir -p strata/Strata-0.2.2/engine
+tar -xzf /tmp/strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz -C strata/Strata-0.2.2/engine
+strata/Strata-0.2.2/engine/strata --version        # strata 0.1.47
+```
+
+引擎包自带 `libcublas*` / `libcudart`（rpath，**不用**设 `LD_LIBRARY_PATH`），`min_driver: 580.65`；
+本机 driver 610.57.04 / CUDA 13.2 直接跑。Python 依赖沿用 0.1.45 时代的 venv 即可
+（两版 `requirements.txt` 只差 cmake/ninja，它们已挪到 `requirements-build.txt`）。
+
+<details>
+<summary>历史：0.1.43.1 → 0.1.45 的自建流程（2026-10-18；仅新卡/新 CUDA 时才需要）</summary>
+
 实测环境：CUDA 13.2 / cmake 4.2 / gcc 15.2 / 76 核。`STRATA_UV=1` 强制 Python 3.12
 （系统 python3 是 3.14，NVIDIA wheel 不齐）。
 
@@ -114,6 +138,8 @@ STRATA_UV=1 ./setup.sh --setup --family unsloth --model UD-Q4_K_XL \
 
 > 💡 **构建与下载可重叠**：setup 的引擎编译（step 4）在模型下载（step 5）之前
 > ⇒ 下载期间先跑 setup 把引擎编好，模型到位后再跑一次补齐 step 6–7。
+
+</details>
 
 ## 4. 模型下载 (Model Download)
 
@@ -169,16 +195,16 @@ modelscope download --model RadixArk/Qwen3.8-Flash-Next-NVFP4 \
 ## 5. Chat Template：合并模板（froggeric v22.5 + 模型自带模式）
 
 v5 生产用的**不是纯 froggeric**，而是 [合并模板](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)
-（248,855 字节）：froggeric v22.5 的渲染修复 + 模型自带 29 段模式正文 + 自动选模式 v2。
+（249,545 字节）：froggeric v22.5 的渲染修复 + 模型自带 29 段模式正文 + 8 个 xhigh 组合键 + 自动选模式 v3。
 规则、词表、评测见 [TEMPLATE.md](TEMPLATE.md)。
 
-为什么不直接用 froggeric：它的默认 effort / think 标记仍然需要，但模型自带的 29 个模式（coder / matlock /
-house / story …）是这份 GGUF 的主要卖点，纯 froggeric 会让它们全部失效。
+为什么不直接用 froggeric：它的默认 effort / think 标记仍然需要，但模型自带的 29 段正文（coder / matlock /
+house / story …）和 8 个 xhigh 组合键是这份 GGUF 的主要卖点，纯 froggeric 会让它们全部失效。
 
 > **模板住的位置两代不同，这决定了"怎么保证它不被覆盖"**：
 > - **v4（FreeToken，历史）**：`<模型目录>/chat_template.jinja`——重下 checkpoint 会覆盖。
 > - **v5（Strata，当前）**：`<Strata-data>/packs/<模型>/tokenizer/chat_template.jinja`——**每次 `setup` 都从
->   GGUF 重新解出，必覆盖** ⇒ 装完 setup 要手工重装一次，判据是 `wc -c` = **248855**。
+>   GGUF 重新解出，必覆盖** ⇒ 装完 setup 要手工重装一次，判据是 `wc -c` = **249545**。
 
 ### 5A. v5 的装法（当前）
 
@@ -189,9 +215,9 @@ cp "$PACK/chat_template.jinja" "$PACK/chat_template.jinja.bak-orig"      # 备�
 cp qwen4090-repo/patches/08_qwen38_froggeric_v225_with_dau_modes.jinja \
    "$PACK/chat_template.jinja"
 
-wc -c "$PACK/chat_template.jinja"                                        # 期望 248855
+wc -c "$PACK/chat_template.jinja"                                        # 期望 249545
 curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["chat_template"]))'
-#   期望 243052（重启后）
+#   期望 243742（重启后）
 ```
 
 **不要再挂"chat 模板守卫"**：旧启动器里的守卫会把 pack 模板强制写成纯 froggeric（28,234 B），
@@ -202,7 +228,8 @@ curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;print(len(json.load(s
 （froggeric 第 17 行 `_default_reasoning_effort`，**原装模板**默认 xhigh）。**重启生效**。
 
 回滚：`cp chat_template.jinja.bak-orig chat_template.jinja`（回原装）或
-`cp chat_template.jinja.v1 chat_template.jinja`（回 v1 合并规则，246,686 B）。
+`cp chat_template.jinja.v1 chat_template.jinja`（回 v1 规则，246,686 B）；
+`cp chat_template.jinja.v2 chat_template.jinja`（回 v2，248,855 B，缺 8 个 xhigh 组合键）。
 
 ### 5B. v4 的装法（历史，FreeToken）
 
@@ -215,7 +242,7 @@ curl -L -o chat_template.jinja \
 
 ## 6. 启动 (Start)
 
-**v5（当前，Strata）**——约 **50 秒**就绪，就绪判据是日志行 `ready:`：
+**v5（当前，Strata）**——约 **36–55 秒**就绪（0.1.47 实测 36 秒），就绪判据是日志行 `ready:`：
 
 ```bash
 #    ⛔ 必须在**你自己的终端**里跑：从 agent/CI 的工具调用里起，进程会落在 systemd
@@ -254,12 +281,12 @@ curl -s localhost:8000/v1/chat/completions \
 **v5（Strata）——三层判据，缺一不可**：
 
 - [ ] **进程到位**：`pgrep -x strata` 有结果，serve 层在听 `:8000`
-- [ ] **模板是合并版**：`wc -c <pack>/tokenizer/chat_template.jinja` = **248855**（原装是 226745）
+- [ ] **模板是合并版**：`wc -c <pack>/tokenizer/chat_template.jinja` = **249545**（v2 是 248855，原装 226745）
 - [ ] **破限**：当前模型自带 abliteration，日志里**不该**出现 ESP 控制向量行（那是 UD-Q4_K_XL 路线的东西）
 - [ ] **端到端真推理**：发一条中文请求，正文可读、无乱码
 - [ ] 模型分片齐（**2 shards**，IQ3_S）、`/v1/models` 返回预期 id
 - [ ] RAM 有余量、swap 为 0、无 Xid/OOM
-- [ ] 显存 ~46.4 GB（2026-10-19 实测 **46,435 / 49,140 MiB**，含 vision）
+- [ ] 显存 ~46.3 GB（2026-10-22 实测 **46,303 / 49,140 MiB**，含 vision；0.1.45 为 46,435）
 - [ ] （装了图的话）发一张测试图，模型能正确描述——并确认 `pgrep -x strata-vision` 有进程
 - [ ] **模式自动选择**：`python3 qwen4090-repo/patches/08_auto_check.py --set dev+val` 应得 dev 95.9% / val 90.0%
 - [ ] ⚠️ **本次未验证**：长上下文（128K/256K）、工具调用结构化、多日稳定性

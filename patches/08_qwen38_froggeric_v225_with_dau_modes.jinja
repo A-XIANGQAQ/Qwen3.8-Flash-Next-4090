@@ -1,8 +1,8 @@
 {#- ------------------------------------------------------------------------------------------- -#}
-{#- DavidAU mode system, merged into froggeric v22.5 (2026-10-18).  The 33 {REASON:} modes of    -#}
+{#- DavidAU mode system, merged into froggeric v22.5 (2026-10-22).  The 41 {REASON:} modes of   -#}
 {#- DavidAU/Qwen3.8-Flash-Next-GSQ-RCO-GGUF, kept verbatim; froggeric's effort/think/tool logic   -#}
 {#- is untouched.  A mode is loaded by a {REASON:<mode>} tag (i prefix = no thinking) or chosen    -#}
-{#- automatically from the conversation's user messages (v2: margin rule, word boundaries).       -#}
+{#- automatically from the conversation's user messages (v3: + 8 xhigh combos; margin rule).     -#}
 {#- ------------------------------------------------------------------------------------------- -#}
 {%- set system_instruction_DAU -%}
 [SYSTEM OPERATING SYSTEM: OMNI-DIMENSIONAL QUANTUM FRAMEWORK v5.0]
@@ -2965,6 +2965,7 @@ Tr:25/100 | SF:95/100 | Alt:20/100 | Comp:100/100 | Mod:10/100 | TM:85/100
 {%- set _mode_medium = '' %}
 {%- set _mode_low = 'Reasoning effort is set to low. Keep your thinking brief and focused, moving directly to the conclusion without unnecessary elaboration.' %}
 {%- set _mode_off = '' %}
+{%- set _xsep = '\n\nIn addition to following "xhigh" directives, use the following directives, instructions and guidelines to process the user prompt and output the final answer:\n' %}
 {%- set instruction_map = {
     'omni': system_instruction_DAU,
     'deeptree': system_instruction_DAU2,
@@ -2999,8 +3000,16 @@ Tr:25/100 | SF:95/100 | Alt:20/100 | Comp:100/100 | Mod:10/100 | TM:85/100
     'stark': system_instruction_stark_DAU,
     'matlock': system_instruction_matlock_DAU,
     'house': system_instruction_house_DAU,
+    'xomni': _mode_xhigh + _xsep + system_instruction_DAU,
+    'xdeeptree': _mode_xhigh + _xsep + system_instruction_DAU2,
+    'xhyper': _mode_xhigh + _xsep + system_instruction_DAU3,
+    'xsocrates': _mode_xhigh + _xsep + system_instruction_DAU4,
+    'xlogic': _mode_xhigh + _xsep + system_instruction_DAU5,
+    'xhelp': _mode_xhigh + _xsep + system_instruction_DAU_help,
+    'xeinstein': _mode_xhigh + _xsep + system_instruction_DAU_EIN,
+    'xspoon': _mode_xhigh + _xsep + system_instruction_DAU_SPOON,
 } %}
-{%- set template_version = "qwen3.8-froggeric-v22.5+dau-modes-v2" %}
+{%- set template_version = "qwen3.8-froggeric-v22.5+dau-modes-v3" %}
 {%- set _tool_format = tool_call_format if tool_call_format is defined else 'xml' %}
 {%- set image_count = namespace(value=0) %}
 {%- set video_count = namespace(value=0) %}

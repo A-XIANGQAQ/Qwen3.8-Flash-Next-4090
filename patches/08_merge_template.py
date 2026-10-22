@@ -9,7 +9,7 @@ tool calling, truncation, warnings) and adds, before the effort sentence is buil
   * automatic mode choice from the conversation's user messages (so nobody has to type tags):
     a linear score over the lexicon below, decided by `top1 >= 2 and top1 > top2` (margin),
     with ASCII single tokens matched on word boundaries,
-  * `instruction_map`, the same 33 mode keys DavidAU's template has.
+  * `instruction_map`, the same 41 mode keys DavidAU's template has (33 + the 8 "xhigh" combinations).
 
 Usage: python3 merge_template.py <froggeric.jinja> <davidau.jinja> <out.jinja>
 Writes <out.jinja> plus <out>.lexicon.json (the lexicon + thresholds, for 08_auto_check.py).
@@ -104,6 +104,18 @@ MODE_LEX = {
 
 FLOOR = 2      # a mode needs at least this many points
 MARGIN = 1     # ... and must lead the runner-up by at least this much
+
+# The 8 "xhigh" combinations the model card and the in-model help menu advertise:
+#   {REASON:x<mode>} = Qwen xhigh directive + <mode> body, exactly as DavidAU's own instruction_map builds them.
+# They are explicit-only: they are NOT in AUTO_ORDER / MODE_LEX, so auto-selection can never pick one.
+XCOMBOS = {
+    'xomni': 'system_instruction_DAU', 'xdeeptree': 'system_instruction_DAU2',
+    'xhyper': 'system_instruction_DAU3', 'xsocrates': 'system_instruction_DAU4',
+    'xlogic': 'system_instruction_DAU5', 'xhelp': 'system_instruction_DAU_help',
+    'xeinstein': 'system_instruction_DAU_EIN', 'xspoon': 'system_instruction_DAU_SPOON',
+}
+XSEP = ('\n\nIn addition to following "xhigh" directives, use the following directives, instructions and '
+        'guidelines to process the user prompt and output the final answer:\n')
 
 SHORT = {
     'xhigh': 'Reasoning effort is set to xhigh. Please think carefully through the task, validate key assumptions, '
@@ -243,22 +255,25 @@ def main(frog_path, dau_path, out_path):
 
     out = []
     out.append('{#- ------------------------------------------------------------------------------------------- -#}\n')
-    out.append('{#- DavidAU mode system, merged into froggeric v22.5 (2026-10-18).  The 33 {REASON:} modes of    -#}\n')
+    out.append('{#- DavidAU mode system, merged into froggeric v22.5 (2026-10-22).  The 41 {REASON:} modes of   -#}\n')
     out.append('{#- DavidAU/Qwen3.8-Flash-Next-GSQ-RCO-GGUF, kept verbatim; froggeric\'s effort/think/tool logic   -#}\n')
     out.append('{#- is untouched.  A mode is loaded by a {REASON:<mode>} tag (i prefix = no thinking) or chosen    -#}\n')
-    out.append('{#- automatically from the conversation\'s user messages (v2: margin rule, word boundaries).       -#}\n')
+    out.append('{#- automatically from the conversation\'s user messages (v3: + 8 xhigh combos; margin rule).     -#}\n')
     out.append('{#- ------------------------------------------------------------------------------------------- -#}\n')
     for name, var in MODES.items():
         if var:
             out.append('{%%- set %s -%%}%s{%%- endset -%%}\n' % (var, blocks[var]))
     for name, text in SHORT.items():
         out.append("{%%- set _mode_%s = %r %%}\n" % (name, text))
+    out.append('{%%- set _xsep = %r %%}\n' % XSEP)
 
     # instruction_map
     out.append('{%- set instruction_map = {\n')
     for name, var in MODES.items():
         val = var if var else '_mode_' + name
         out.append("    '%s': %s,\n" % (name, val))
+    for name, var in XCOMBOS.items():
+        out.append("    '%s': _mode_xhigh + _xsep + %s,\n" % (name, var))
     out.append('} %}\n')
 
     # --- the insertion point in froggeric: right before the effort sentence is built
@@ -283,13 +298,13 @@ def main(frog_path, dau_path, out_path):
     merged = merged.replace(old_strip2, old_strip2 +
                             "        {%- if _mode.tag and _mode.tag in content %}{%- set content = content.split(_mode.tag) | join('') | trim %}{%- endif %}\n")
     merged = merged.replace('{%- set template_version = "qwen3.8-froggeric-v22.5" %}',
-                            '{%- set template_version = "qwen3.8-froggeric-v22.5+dau-modes-v2" %}')
+                            '{%- set template_version = "qwen3.8-froggeric-v22.5+dau-modes-v3" %}')
 
     open(out_path, 'w', encoding='utf-8').write(''.join(out) + merged)
 
     sidecar = re.sub(r'\.jinja$', '', out_path) + '.lexicon.json'
     with open(sidecar, 'w', encoding='utf-8') as fh:
-        json.dump({'version': 'dau-modes-v2', 'floor': FLOOR, 'margin': MARGIN,
+        json.dump({'version': 'dau-modes-v3', 'floor': FLOOR, 'margin': MARGIN,
                    'order': AUTO_ORDER,
                    'lexicon': {m: {str(w): ws for w, ws in MODE_LEX[m].items()} for m in AUTO_ORDER},
                    'punct': PUNCT}, fh, ensure_ascii=False, indent=1)

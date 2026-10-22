@@ -4,7 +4,7 @@
 
 | 编号 | 文件 | 状态 | 说明 |
 |---|---|---|---|
-| **08** | `08_merge_template.py` + `08_qwen38_froggeric_v225_with_dau_modes.jinja` + `.lexicon.json` | **生产在用** | 合并模板（froggeric v22.5 + 模型自带 29 段模式正文 + 自动选模式 v2）。只改模板，不动服务端。见 [../docs/TEMPLATE.md](../docs/TEMPLATE.md) |
+| **08** | `08_merge_template.py` + `08_qwen38_froggeric_v225_with_dau_modes.jinja` + `.lexicon.json` | **生产在用** | 合并模板 v3（froggeric v22.5 + 模型自带 29 段模式正文 + 8 个 xhigh 组合键 = `instruction_map` 41 键 + 自动选模式 v3）。只改模板，不动服务端。见 [../docs/TEMPLATE.md](../docs/TEMPLATE.md) |
 | 08 | `08_auto_check.py` / `08_autolex_gen.py` / `08_autolex_mine.py` | 工具 | 评测（渲染真实模板认模式）、语料生成、lift 挖词 |
 | 07 | `07_strata_esp_family_whitelist.patch` | 可选 | 让 Strata 的 ESP 家族白名单放行 `unsloth`。**当前模型自带 abliteration，不需要它**；只在回滚到 UD-Q4_K_XL 或重跑 `setup.sh` 时用 |
 

@@ -1,6 +1,6 @@
 # 运维手册 (Operations)
 
-> **只有一条路能跑**：v5（Strata 0.1.45）。v4（FreeToken）的运行时与权重**已于 2026-10-18 删除**，
+> **只有一条路能跑**：v5（Strata 0.2.2 服务端 + 0.1.47 预编译引擎）。v4（FreeToken）的运行时与权重**已于 2026-10-18 删除**，
 > 回滚需要重新安装引擎——§1b 的流程保留作记录，**现在执行不了**。
 > 引擎细节见 [STRATA.md](STRATA.md)，同代版本升级见 §1c，模板见 [TEMPLATE.md](TEMPLATE.md)。
 
@@ -20,7 +20,7 @@
 #    从自己终端起则落在登录会话（KillUserProcesses 默认不杀 + Linger=yes），**关掉终端也不会死**。
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 # 桌面版（含「等显存 <1000 MiB」+ 关 GUI）：bash ~/桌面/一些启动脚本/start_strata_kill_gui.sh
-# 就绪标志：日志行 "ready:"（约 40–55 秒）
+# 就绪标志：日志行 "ready:"（0.1.47 实测 36 秒，0.1.45 为 39–55 秒）
 #   ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions, Anthropic: /v1/messages, context 262144 tokens)
 
 # ── 推荐：一次性 systemd 用户单元（2026-10-18 起本站生产就用这个）─────────
@@ -56,7 +56,7 @@ tail -f /tmp/ft.log
 ```bash
 python3 patches/08_auto_check.py --set dev+val                  # 离线回归（渲染真实模板）
 python3 patches/08_auto_check.py --case "讲个笑话"               # 单条排查，带分数
-wc -c <pack>/tokenizer/chat_template.jinja                      # 248855 = v2 已装
+wc -c <pack>/tokenizer/chat_template.jinja                      # 249545 = v3 已装
 ```
 
 判定一句话：**分数 ≥ 2 且严格高于第二名才选，否则不选**（回落 froggeric 默认）。
@@ -86,7 +86,32 @@ bash stop_strata.sh               # 停 v5（含显存释放判据）
 
 ## 1c. 引擎版本升级 (Upgrading to a new upstream tag)
 
-> 2026-10-18 用这套流程从 `0.1.43.1` 升到 `0.1.45`，实测数据见 [UPGRADE.md](UPGRADE.md) §0b。
+**0.2.2 起的做法（2026-10-22 实战）**：上游从 0.2.0 起发布 **Linux 预编译引擎**（签名 feed，arch 含 sm_89），
+不需要再自己编。只换两样东西：**服务端源码** + **引擎目录**，**不跑 `setup.py`**。
+
+```bash
+# ① 下载并校验（sha256 必须等于签名 feed 里的值）
+gh release download v0.2.2 --repo Niko1221/Strata \
+  -p 'strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
+sha256sum /tmp/strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz
+#   45a6df98aaf4b6b7c05087a4ab428be8df478ddcc07193a13cbaab312b85895e
+curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.2.tar.gz \
+  | tar -xz -C strata/Strata-0.2.2 --strip-components=1
+mkdir -p strata/Strata-0.2.2/engine
+tar -xzf /tmp/strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz -C strata/Strata-0.2.2/engine
+
+# ② 配置：复制生产 config，只改 exe / vision.exe / cwd / log，args 逐字不动
+# ③ 停机切换（实测中断 48 秒）
+bash strata/stop_strata.sh          # 等到显存 <1000 MiB
+bash strata/run_strata.sh           # 新启动器 run_strata_022.sh；旧的在 run_strata_0145.sh
+# ④ 验收（6 项）
+bash strata/test_strata_022.sh
+```
+
+验收要点：`/health.loaded=true`、`/props` 的 `build_info="Strata 0.1.47"` 且 `chat_template` 长度 243742、
+`讲个笑话` 的 prompt_tokens=2847、视觉请求 200、日志出现 `session is up (engine 0.1.47)`、`tool_calls` 正常。
+
+> 下面的「自建引擎」流程是 0.1.43.1 → 0.1.45 时代（2026-10-18）的做法，**只在预编译包不可用（新卡/新 CUDA）时才用**。
 
 **顺序不能变**：并行构建 → 冷启动 A/B → 达标才换二进制。**任何一步都不跑 `update.sh` / `setup.py` 主流程**。
 
@@ -119,7 +144,7 @@ bash "/path/to/start_strata_kill_gui.sh"                     # 自己的终端
 
 **三条铁律**：
 
-1. **server.py / 引擎 / vision 必须同版本**。0.1.45 的 `setup.py` 写死 `MIN_ENGINE = (0, 1, 45)`，
+1. **server.py / 引擎 / vision 必须同版本**。0.2.2 的 `setup.py` 写死 `MIN_ENGINE = (0, 1, 46)`，
    且 `stale_binary()` 会拒绝安装「版本与源码不符」的二进制——只换其中一个会得到诡异行为。
 2. **只调 `build_engine()`，不要跑 setup 主流程**：`carry_over()` 不会合并手工加进 `args` 的选项
    （12 个手调参数会丢）；且 setup 对大分片算 SHA-256 有已知 bug（#2902），**会删掉正确的模型分片**。

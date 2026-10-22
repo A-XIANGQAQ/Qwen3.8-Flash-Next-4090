@@ -1,10 +1,11 @@
 # 升级记录 (Upgrade Log)
 
-本页记录本项目的引擎演进。当前为 **v5.2（Strata 0.1.45 + DavidAU abliterated IQ3_S）**，v1–v4（FreeToken / 官方 sglang / Lsglang）全部折叠保留作参考。
+本页记录本项目的引擎演进。当前为 **v5.3（Strata 0.2.2 服务端 + 0.1.47 预编译引擎 + DavidAU abliterated IQ3_S + 合并模板 v3）**，v1–v4（FreeToken / 官方 sglang / Lsglang）全部折叠保留作参考。
 
 | 版本 | 时间 | 路线 | 状态 |
 |---|---|---|---|
-| **v5.2（当前）** | **2026-10-18** | **Strata 0.1.45 + DavidAU abliterated IQ3_S**（模型自带破限，**不再用 ESP**；4-bit→3.5bpw，快 10~52%，拒答 4.55%→0%） | ✅ 已上线（见 §0c） |
+| **v5.3（当前）** | **2026-10-22** | **Strata 0.2.2 服务端 + 0.1.47 预编译引擎** + DavidAU IQ3_S + 合并模板 v3（41 键） | ✅ 已上线（见 §0d） |
+| v5.2 | 2026-10-18 | **Strata 0.1.45 + DavidAU abliterated IQ3_S**（模型自带破限，**不再用 ESP**；4-bit→3.5bpw，快 10~52%，拒答 4.55%→0%） | 被 v5.3 取代（引擎升级，模型/参数未变），见 §0c |
 | v5.1 | 2026-10-18 | **Strata 0.1.45** + UD-Q4_K_XL + ESP 破限（[patch 07](../patches/07_strata_esp_family_whitelist.patch) 已对位到 0.1.45 的 `setup.py:6643`） | 被 v5.2 取代；UD-Q4_K_XL 权重已删（回滚需重下 104 GB），见 §0c.4 |
 | v5.0 | 2026-10-13 | **Strata 0.1.43.1** + 自带 ESP 破限 | 已被 v5.1 取代；引擎二进制留档，可回滚（见 §0b.6、§0.2） |
 | v4 | 2026-09-24 | **FreeToken 0.1.3** + 三个本地补丁 + abliterated NVFP4 | ⛔ 运行时与权重已于 2026-10-18 删除，**不可回滚**（见 §1 历史记录） |
@@ -245,7 +246,7 @@ MTP 复用基座草稿头仍然有效：`drafts accepted 79 of 94`。
 3. **GGUF 里没有 MTP 张量**（作者另有 `…-MTP-GGUF` 仓库）。按 [Strata docs/ORCA.md](https://github.com/Niko1221/Strata/blob/v0.1.45/docs/ORCA.md) 的做法复用
    基座 `mtp/rt` 草稿头，由目标模型自己校验草稿；`drafts accepted` 正常。
 4. **绝不能跑 chat 模板守卫**。模型自带 221,835 字符的模板（27 推理 + 27 指令模式 + AI Constructs）。
-   > 📌 2026-10-19 起已改为**合并模板**（248,855 B，把 29 段正文并进 froggeric），见 [TEMPLATE.md](TEMPLATE.md)；
+   > 📌 2026-10-19 起已改为**合并模板**（29 段正文并进 froggeric）；2026-10-22 的 v3 为 **249,545 B**（再加 8 个 xhigh 组合键），见 [TEMPLATE.md](TEMPLATE.md)；
    > 本条记录的是 10-18 换模型当时的做法。
    `iq_pack.py` 已从 GGUF 原样导出到 `pack/tokenizer/chat_template.jinja`；
    旧的 `run_strata.sh` 会用 froggeric 模板覆盖它，等于把这个模型的核心能力删掉。
@@ -262,6 +263,67 @@ MTP 复用基座草稿头仍然有效：`drafts accepted 79 of 94`。
 **磁盘 340 GB → 449 GB 可用**。旧生产配置移到 `backups/strata-unsloth-ud-q4_k_xl.json.disabled`（防止误启动）。
 
 ⚠️ 代价：回滚到 UD-Q4_K_XL 需要重新下载 104 GB，没有本地副本。
+
+---
+
+## 0d. v5.3：0.1.45 → 0.2.2 服务端 + 0.1.47 引擎（2026-10-22）
+
+> 上游在 10-19 到 10-21 连发 0.2.0-beta / 0.2.1（+4 个补丁版）/ 0.2.2。这一节只记「哪些与我们有关、
+> 怎么升、升完实测到什么」。**模型、pack、启动参数都没换。**
+
+### 0d.1 上游改了什么（只列影响我们的）
+
+0.2.x 把 Strata 拆成 app / Terminal / engine 三部分；engine 从 0.1.45 升到 0.1.46（0.2.1）再到 0.1.47（0.2.2）。
+
+| 变更 | 对我们的影响 |
+|---|---|
+| **Linux 预编译引擎**（签名 feed，0.1.47 包 arch 含 sm_89） | ✅ 不用再自建，省掉一次编译和 patch 07 |
+| 图片默认开启；<24 GB 卡用 CPU 读图 | 我们显式 `--vision`，不变 |
+| 文件层 prompt chunk 按 RAM/SSD 重新计价（0.2.0） | 长 prompt 读取速度可能变；实测 4.8K prompt 3,287 t/s |
+| 解码默认调优表（sm_86 / sm_60、Gyro、P100） | **sm_89 不在表里**，4090 无预期变化（实测持平） |
+| `#3465` 长 prompt 出现 NaN 后重试整段 | ✅ 长上下文更稳 |
+| `#3488` 复用的 PID 不再永久卡住加载 | ✅ |
+| 工具调用：模型写错开头（`<NAME>` 等）能纠正 | ✅ |
+| **Chat Completions 未声明 tools 时不再返回 `tool_calls`** | ⚠️ 行为变化；我们客户端都声明 tools，实测正常 |
+| `thinking_budget_tokens` 被读取、Anthropic usage 修正 | ✅ |
+| `setup.py` 的 `MIN_ENGINE = (0, 1, 46)` | 服务端/引擎必须同代 |
+
+### 0d.2 为什么用「预编译引擎 + 源码服务端」，不跑 setup
+
+1. `setup.py` 会从 GGUF 重导**原装模板**，覆盖合并模板（TROUBLESHOOTING #49）；
+2. `carry_over()` 会重写 run config，**丢掉手加的参数**；
+3. 0.1.44+ 的分片 SHA 校验有已知 bug（#2902），**可能删掉正确的模型分片**；
+4. 引擎包是签名 feed 的产物，sha256 与 feed 逐字节一致（`45a6df98…b85895e`），比自己编更接近上游测试过的组合。
+
+只换 `serve/`（官方 tag 原样）与 `engine/`（官方包），模型 / pack / config / template 都不动。
+
+### 0d.3 实测
+
+| 指标 | 0.1.45 | **0.1.47** |
+|---|---:|---:|
+| 停机时间 | — | **48 秒**（09:36:05 停 → 09:36:53 可服务） |
+| 启动到就绪 | 39 s | **36 s** |
+| 显存（含 vision） | 46,435 MiB | **46,303 MiB** |
+| `/props` 模板字符 | 243,052 | **243,742**（v3 模板 +690） |
+| 4,816 token prompt 读取 | 5,951 @ 2,538 t/s（当时口径） | **3,287 t/s** |
+| decode（短回答 8–160 token） | 112–157 t/s | **99–141 t/s**（不同请求长度，噪声内持平） |
+| 专家缓存命中 | 98.6–99.0% | **98.6%**（105,571 / 107,098） |
+| tool_calls / Anthropic / 视觉 | ✅ | ✅（0.2.2 服务端 + 0.1.47 引擎） |
+
+**结论：速度没退，也没有可归因于 0.2.2 的提升（sm_89 不在上游调优表里）；升级收益是稳定性修复与新服务端行为。**
+严格 A/B（同 prompt、同 config、两臂各跑一遍）没做——需要再停两次服，收益不足以抵消业务中断；
+当前判据是「同 workload 的 decode 不下滑 + 全部验收项通过」。
+
+### 0d.4 回滚
+
+```bash
+bash strata/stop_strata.sh
+cp strata/run_strata_0145.sh strata/run_strata.sh      # 启动器指回旧树 + 旧引擎
+bash strata/run_strata.sh
+```
+
+旧树 `strata/Strata/`（tag v0.1.45 + 引擎 0.1.45）与旧 config 都没动过，回滚不需要重新下载或编译。
+模板 v3 与引擎无关；要连模板一起回 v2：`cp chat_template.jinja.v2 chat_template.jinja`（然后重启）。
 
 ---
 

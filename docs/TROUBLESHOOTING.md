@@ -360,13 +360,14 @@ CUDA error: out of memory
 
 ## 🔴 39. 升级引擎后行为诡异：三个组件必须是同一个版本
 
-0.1.45 的 `setup.py` 顶部写死了 `MIN_ENGINE = (0, 1, 45)`，`build_engine()` 里的 `stale_binary()` 还会
-对比「二进制里的版本」与「源码版本」，不一致就拒绝安装。所以**不能只换 `serve/server.py`，也不能只换引擎**。
+0.2.2 的 `setup.py` 顶部写死了 `MIN_ENGINE = (0, 1, 46)`（0.1.45 时代是 `(0, 1, 45)`），`build_engine()` 里的
+`stale_binary()` 还会对比「二进制里的版本」与「源码版本」，不一致就拒绝安装。所以**不能只换 `serve/server.py`，也不能只换引擎**。
 
 - 症状形态：server 起来了、`/v1/models` 也 200，但某些能力（`--parallel`、新的 `RUNNING` 行解析）
-  静默降级——因为 0.1.45 的 server 会按「引擎太老」处理，不报错，只少给功能。
-- 判据：`engine/BUILD.json` 的 `version`、`engine/strata --version`、`serve/server.py` 里
-  `PARALLEL_MAX`、`setup.py` 里 `MIN_ENGINE` 四者应当指向同一个 tag。
+  静默降级——旧 server 会按「引擎太老/太新」处理，不报错，只少给功能。
+- 判据：`engine/BUILD.json` 的 `version`、`engine/strata --version`、`/props` 的 `build_info`、
+  `serve/server.py` 里 `PARALLEL_MAX`、`setup.py` 里 `MIN_ENGINE` 应当指向同一代。
+  本站当前已知可用配对：**服务端 0.2.2 + 引擎 0.1.47**（`/props.build_info = "Strata 0.1.47"`）。
 - 修法：整套换。见 [OPERATIONS.md](OPERATIONS.md) §1c。
 
 ## 🔴 40. 别让 `update.sh` / `setup.py` 碰你的模型分片
@@ -523,9 +524,9 @@ systemd-run --user --unit=strata-prod --collect \
 
 ```bash
 wc -c <pack>/tokenizer/chat_template.jinja
-#   v2 合并模板 248855 | v1 合并模板 246686 | froggeric 28234 | 原装 226745
+#   v3 合并模板 249545 | v2 248855 | v1 246686 | froggeric 28234 | 原装 226745
 curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["chat_template"]))'
-#   v2 243052 | v1 241214
+#   v3 243742 | v2 243052 | v1 241214
 ```
 
 恢复：
@@ -546,8 +547,8 @@ cp qwen4090-repo/patches/08_qwen38_froggeric_v225_with_dau_modes.jinja \
 
 ```bash
 # 1. 模板对不对（不是原装、不是 froggeric）
-wc -c <pack>/tokenizer/chat_template.jinja          # 248855 = v2
-curl -s 127.0.0.1:8000/props | grep -c 'dau-modes-v2'   # 1
+wc -c <pack>/tokenizer/chat_template.jinja          # 249545 = v3
+curl -s 127.0.0.1:8000/props | grep -c 'dau-modes-v3'   # 1
 
 # 2. 规则对不对（离线，渲染真实模板，不碰 GPU）
 python3 qwen4090-repo/patches/08_auto_check.py --set dev+val

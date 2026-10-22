@@ -15,10 +15,10 @@
 > **这不是回滚用的补丁，v5 必须打。**
 
 > ⚠️ **v5.2 起还换了一份 chat 模板**：[`patches/08_qwen38_froggeric_v225_with_dau_modes.jinja`](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)
-> —— 把 DavidAU 模型自带的 41 个 `{REASON:xxx}` 模式（29 段正文逐字节照搬）并进 froggeric v22.5，
-> 由模板自己按关键词选模式，**服务端代码一行不改**。装机 = 拷到 `<pack>/tokenizer/chat_template.jinja` 后重启；
-> `setup.sh` 会从 GGUF 重新导出原装模板覆盖它，重跑 setup 后要再拷一次（TROUBLESHOOTING #49）。
-> 生成器：[`patches/08_merge_template.py`](../patches/08_merge_template.py)。
+> —— 把 DavidAU 模型自带的 41 个 `{REASON:xxx}` 键（29 段正文逐字节照搬 + 8 个 xhigh 组合 + 4 个 effort 档）
+> 并进 froggeric v22.5，由模板自己按关键词选模式，**服务端代码一行不改**。装机 = 拷到
+> `<pack>/tokenizer/chat_template.jinja` 后重启；`setup.sh` 会从 GGUF 重新导出原装模板覆盖它，
+> 重跑 setup 后要再拷一次（TROUBLESHOOTING #49）。生成器：[`patches/08_merge_template.py`](../patches/08_merge_template.py)。
 
 ---
 
@@ -103,7 +103,11 @@ STRATA_UV=1 ./setup.sh --setup --family unsloth --model UD-Q4_K_XL \
 > 💡 **构建与下载可重叠**：`setup.sh` **内部**的引擎编译步骤排在模型下载步骤之前。
 > 下载期间先跑一次 setup 让它把引擎编好，模型到位后再跑一次补齐后续步骤。
 
-### 3.1 升级到新 tag：只调 `build_engine()`，不要重跑 setup
+### 3.1 升级到新 tag：0.2.2 起改用预编译引擎
+
+> ⚠️ **2026-10-22 起不再自建**：0.2.0 起上游发 Linux 预编译引擎（签名 feed，arch 含 sm_89）。
+> 生产升级走 [OPERATIONS §1c](OPERATIONS.md) 的「下载 + 校验 sha256 + 换 `engine/` 目录」，
+> 不跑 `setup.py`、不编译。下面这段自建流程只在**新卡/新 CUDA 没有对应预编译包**时参考（以 0.1.45 为例）。
 
 上面那套 `setup.sh` 是**首次安装**用的。机器上已经跑着生产、config 里有 12 个手调参数时，
 **再跑一次 setup 会出事**：`carry_over()` 明确不会合并手工加进 `args` 的选项；而且 setup 对大分片的
@@ -305,18 +309,19 @@ A smaller --prefill, or auto, keeps them all in RAM
 
 ## 7. chat 模板：谁负责它不被覆盖
 
-**现状（2026-10-19 起）**：pack 里装的是**合并模板**（248,855 B）——
-froggeric v22.5 的渲染修复 + 模型自带的 29 段模式正文 + 自动选模式 v2。规则见 [TEMPLATE.md](TEMPLATE.md)。
+**现状（2026-10-22 起 v3）**：pack 里装的是**合并模板**（249,545 B）——
+froggeric v22.5 的渲染修复 + 模型自带的 29 段模式正文 + 8 个 xhigh 组合键 + 自动选模式 v3。规则见 [TEMPLATE.md](TEMPLATE.md)。
 
 | 模板 | 大小 | `reasoning_effort` 枚举 | 说明 |
 |---|---:|---:|---|
 | Strata 原装（从 GGUF 解出） | 9,993 B | 7 | 严格枚举，客户端发 `high` 会 400 |
 | 纯 froggeric v22.5 | 28,234 B | 2 | effort 别名全收，但没有模式系统 |
-| **合并模板（当前）** | **248,855 B** | 2 | froggeric + 29 段模式正文 + 自动选模式 |
+| 合并模板 v2 | 248,855 B | 2 | 41 键里只有 33 个（8 个 xhigh 组合被丢） |
+| **合并模板 v3（当前）** | **249,545 B** | 2 | froggeric + 29 段正文 + 8 个 xhigh 组合 + 自动选模式 |
 
 > ⚠️ 三个坑：
 > 1. **Strata 每次 `setup` 都从 GGUF 重新解出原装模板**，手工替换必被覆盖 ⇒ setup 之后要重装一次模板，
->    判据 `wc -c` = **248855**（见 [REPRODUCTION §5A](REPRODUCTION.md)）。
+>    判据 `wc -c` = **249545**（`/props` 里 243742 字符，见 [REPRODUCTION §5A](REPRODUCTION.md)）。
 > 2. **别再挂"模板守卫"**：旧启动器里那条守卫会把模板强制写成纯 froggeric（28,234 B），
 >    恰好把合并模板冲掉。本站启动器已移除它（备份 `run_strata.sh.bak-undq4-20261018`），
 >    现在只靠"重装 + 判据"来保证。
@@ -328,17 +333,17 @@ froggeric v22.5 的渲染修复 + 模型自带的 29 段模式正文 + 自动选
 ## 8. 运维
 
 > 下表的脚本名是本站的（`run_strata.sh` / `stop_strata.sh`，**本仓库不含这两个文件**——它们是按 §5
-> 的参数写的薄封装）。自建启动器只需两件事：① 启动前跑一次 chat 模板守卫（§7）；
-> ② `exec ./.venv/bin/python ./serve/server.py --engine strata --config <配置>.json --port 8000`。
+> 的参数写的薄封装）。自建启动器只需两件事：① 启动前核对合并模板大小（249545；**不挂自动改写守卫**，
+> 旧守卫会把它写成纯 froggeric 28,234 B）；② `exec <venv>/bin/python ./serve/server.py --engine strata --config <配置>.json --port 8000`。
 
 | 动作 | 命令 |
 |---|---|
 | 启动（约 50 秒就绪） | `nohup bash run_strata.sh > strata-prod.log 2>&1 &` —— **必须在自己终端里跑**，见 [OPERATIONS §1](OPERATIONS.md)（从 agent 的工具调用里起会被 cgroup 连坐） |
 | 停止（约 10–20 秒 + 等显存） | `bash stop_strata.sh`——轮询 `nvidia-smi` 到 used <1000 MiB 才算停干净 |
 | 引擎互切 | 本站用自建的一键脚本（**不在本仓库**；流程见 [OPERATIONS §1b](OPERATIONS.md)） |
-| 模板守卫 | 挂在启动器上（`ensure_chat_template.sh` 式做法，幂等、fail-open）；v4 的启动器同样挂了 |
+| 模板 | **不挂自动改写守卫**；启动器只核对 `wc -c` = 249545（守卫会把模板写成纯 froggeric） |
 
-⚠️ **必须用启动器启动，不要用 `./setup.sh`** —— 后者会自己拉起模型并绕过模板守卫。
+⚠️ **必须用启动器启动，不要用 `./setup.sh`** —— 后者会自己拉起模型并绕过模板核对。
 
 健康判据（三层，缺一不可）：进程 → **破限判据行** → 端到端推理。
 `control vector mode = project, dir = per-layer, layers 4..44 (41 steered)`

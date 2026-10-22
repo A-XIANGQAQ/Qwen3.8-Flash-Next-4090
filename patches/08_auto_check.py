@@ -16,6 +16,7 @@ Usage:
   python3 08_auto_check.py --case "讲个笑话"     # one ad-hoc question, with scores
 """
 import argparse
+import ast
 import json
 import re
 import sys
@@ -211,6 +212,17 @@ def mode_bodies(source: str):
         body_map[var] = body.strip()
     short = dict(re.findall(r"\{%-\s*set\s+(_mode_[A-Za-z0-9_]+)\s*=\s*'([^']*)'\s*%\}", source))
     out = {}
+    # The 8 xhigh combinations come first: their body starts with the xhigh sentence, so their prefix has to be
+    # longer than the plain `xhigh` body's (which is a prefix of theirs) or detect() would name the wrong mode.
+    xmap = re.findall(r"'(x[a-z0-9_]+)':\s*_mode_xhigh \+ _xsep \+ (system_instruction_[A-Za-z0-9_]+),", source)
+    msep = re.search(r"\{%-\s*set\s+_xsep\s*=\s*('(?:[^'\\]|\\.)*')\s*%\}", source)
+    xhigh = short.get('_mode_xhigh', '')
+    if xmap and msep and xhigh:
+        sep = ast.literal_eval(msep.group(1))
+        for name, var in xmap:
+            text = body_map.get(var) or ''
+            if len(text) >= 80:
+                out[name] = xhigh + sep + text[:80]
     for name, var in variables.items():
         text = body_map.get(var) or short.get(var) or ''
         if len(text) >= 80:
