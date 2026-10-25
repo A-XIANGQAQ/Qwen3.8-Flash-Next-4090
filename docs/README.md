@@ -11,6 +11,7 @@
 | [REPRODUCTION.md](REPRODUCTION.md) | 从零复现：硬件、模型下载、引擎、模板、启动、成功判据 |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | 症状 → 判据 → 修复（现行编号 29–50 + 通用项） |
 | [STRATA-UPSTREAM-2026-10-25.md](STRATA-UPSTREAM-2026-10-25.md) | 上游 0.2.3/0.2.4 评估：为什么暂缓、升级阈值 |
+| [GPU-UNLOCK.md](GPU-UNLOCK.md) | GPU 张量速率解锁实测：指令级 2×、本栈无收益、回滚 |
 
 ## 历史
 

@@ -116,6 +116,8 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 - **视觉**在跑，但本次基准全是文本；图像编码器显存需求见 [docs/STRATA.md §7](docs/STRATA.md)。
 - 256K 只测了单请求；4 路 × 256K 的并发未实测。
 - 前缀缓存复用延迟未单独测（本页全用新 prompt）。
+- **张量速率解锁**（gpu-unlock-ada）已在本卡实测：指令级 2×，但本栈无收益（8K prefill 0.983×）；
+  单次冷启动、未做 matched 复测。见 [docs/GPU-UNLOCK.md](docs/GPU-UNLOCK.md)。
 - 详细限制：[docs/BENCHMARK.md §7](docs/BENCHMARK.md)。
 
 ## 历史（压缩）
