@@ -1,0 +1,30 @@
+Namespace(backend='openai-chat', base_url=None, host='127.0.0.1', port=8000, endpoint='/v1/chat/completions', dataset=None, dataset_name='random', dataset_path=None, max_concurrency=4, model='qwen3.8-flash-next-davidau-iq3s-ablit', tokenizer='/home/gfyd-ai/dsh_workspace/qwen4090-repo/bench/tokenizer', best_of=1, use_beam_search=False, num_prompts=4, logprobs=None, request_rate=inf, burstiness=1.0, seed=112, trust_remote_code=False, disable_tqdm=True, profile=False, save_result=True, metadata=None, result_dir='/home/gfyd-ai/dsh_workspace/qwen4090-repo/bench/results/2026-10-25/raw', result_filename='C4_8K.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl', metric_percentiles='99', goodput=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, random_input_len=8192, random_output_len=256, random_range_ratio=1.0, random_prefix_len=0, hf_subset=None, hf_split=None, hf_output_len=None, tokenizer_mode='auto', served_model_name=None, lora_modules=None)
+Starting initial single prompt test run...
+Initial test run completed. Starting main benchmark run...
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 4
+============ Serving Benchmark Result ============
+Successful requests:                     4         
+Benchmark duration (s):                  13.97     
+Total input tokens:                      32768     
+Total generated tokens:                  912       
+Request throughput (req/s):              0.29      
+Output token throughput (tok/s):         65.30     
+Total Token throughput (tok/s):          2411.48   
+---------------Time to First Token----------------
+Mean TTFT (ms):                          6152.43   
+Median TTFT (ms):                        6155.09   
+P99 TTFT (ms):                           9781.18   
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          36.59     
+Median TPOT (ms):                        30.55     
+P99 TPOT (ms):                           68.42     
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           35.04     
+Median ITL (ms):                         24.33     
+P99 ITL (ms):                            83.89     
+==================================================
+
+--- stderr ---
+None of PyTorch, TensorFlow >= 2.0, or Flax have been found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.

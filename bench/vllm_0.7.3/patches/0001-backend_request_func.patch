@@ -1,0 +1,82 @@
+--- a/backend_request_func.py
++++ b/backend_request_func.py
+@@ -254,6 +254,10 @@
+             "stream_options": {
+                 "include_usage": True,
+             },
++            # LOCAL PATCH (qwen4090-repo): disable thinking so TTFT measures
++            # prefill, not the reasoning phase. Strata accepts
++            # chat_template_kwargs on the OpenAI chat endpoint.
++            "chat_template_kwargs": {"enable_thinking": False},
+         }
+         if request_func_input.ignore_eos:
+             payload["ignore_eos"] = request_func_input.ignore_eos
+@@ -278,6 +282,11 @@
+                         chunk_bytes = chunk_bytes.strip()
+                         if not chunk_bytes:
+                             continue
++                        # LOCAL PATCH (qwen4090-repo): Strata emits SSE
++                        # keep-alive comments (": keep-alive"); skip anything
++                        # that is not a data line.
++                        if not chunk_bytes.startswith(b"data:"):
++                            continue
+ 
+                         chunk = chunk_bytes.decode("utf-8").removeprefix(
+                             "data: ")
+@@ -359,6 +368,10 @@
+             "stream_options": {
+                 "include_usage": True,
+             },
++            # LOCAL PATCH (qwen4090-repo): disable thinking so TTFT measures
++            # prefill, not the reasoning phase. Strata accepts
++            # chat_template_kwargs on the OpenAI chat endpoint.
++            "chat_template_kwargs": {"enable_thinking": False},
+         }
+         if request_func_input.ignore_eos:
+             payload["ignore_eos"] = request_func_input.ignore_eos
+@@ -384,6 +397,11 @@
+                         chunk_bytes = chunk_bytes.strip()
+                         if not chunk_bytes:
+                             continue
++                        # LOCAL PATCH (qwen4090-repo): Strata emits SSE
++                        # keep-alive comments (": keep-alive"); skip anything
++                        # that is not a data line.
++                        if not chunk_bytes.startswith(b"data:"):
++                            continue
+ 
+                         chunk = chunk_bytes.decode("utf-8").removeprefix(
+                             "data: ")
+@@ -391,8 +409,16 @@
+                             timestamp = time.perf_counter()
+                             data = json.loads(chunk)
+ 
+-                            if choices := data.get("choices"):
+-                                content = choices[0]["delta"].get("content")
++                            # LOCAL PATCH (qwen4090-repo): TTFT/ITL only on
++                            # real content tokens; the first chunk is a role
++                            # stub and the last one may carry only usage.
++                            if usage := data.get("usage"):
++                                output.output_tokens = usage.get(
++                                    "completion_tokens")
++                            choices = data.get("choices") or []
++                            content = (choices[0].get("delta", {}).get(
++                                "content") if choices else None)
++                            if content:
+                                 # First token
+                                 if ttft == 0.0:
+                                     ttft = timestamp - st
+@@ -403,12 +429,8 @@
+                                     output.itl.append(timestamp -
+                                                       most_recent_timestamp)
+ 
+-                                generated_text += content or ""
+-                            elif usage := data.get("usage"):
+-                                output.output_tokens = usage.get(
+-                                    "completion_tokens")
+-
+-                            most_recent_timestamp = timestamp
++                                generated_text += content
++                                most_recent_timestamp = timestamp
+ 
+                     output.generated_text = generated_text
+                     output.success = True

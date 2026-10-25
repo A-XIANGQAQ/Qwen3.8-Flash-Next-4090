@@ -1,0 +1,102 @@
+--- a/benchmark_serving.py
++++ b/benchmark_serving.py
+@@ -371,10 +371,11 @@
+     range_ratio: float,
+     tokenizer: PreTrainedTokenizerBase,
+ ) -> List[Tuple[str, int, int]]:
+-    prefix_token_ids = np.random.randint(0,
+-                                         tokenizer.vocab_size,
+-                                         size=prefix_len).tolist()
+-
++    # LOCAL PATCH (qwen4090-repo): vLLM's stock sampler decodes random token
++    # *ids* into text. On a byte-level BPE tokenizer that round-trip is lossy
++    # (invalid UTF-8 -> U+FFFD), and Strata re-tokenized a nominal 1K prompt as
++    # 3.3K tokens. Build the prompt from a fixed word list instead: it round-
++    # trips to the same token count and still avoids prefix-cache reuse.
+     input_lens = np.random.randint(
+         int(input_len * range_ratio),
+         input_len + 1,
+@@ -385,19 +386,59 @@
+         output_len + 1,
+         size=num_prompts,
+     )
+-    offsets = np.random.randint(0, tokenizer.vocab_size, size=num_prompts)
+     input_requests = []
+     for i in range(num_prompts):
+-        prompt = tokenizer.decode(prefix_token_ids +
+-                                  [(offsets[i] + i + j) % tokenizer.vocab_size
+-                                   for j in range(input_lens[i])])
+-
+-        input_requests.append((prompt, int(prefix_len + input_lens[i]),
+-                               int(output_lens[i]), None))
++        ids = _synthetic_token_ids(tokenizer, int(prefix_len + input_lens[i]))
++        prompt = tokenizer.decode(ids)
++        input_requests.append((prompt, len(ids), int(output_lens[i]), None))
+ 
+     return input_requests
+ 
+ 
++
++_RANDOM_WORDS = (
++    "the of and to in a is that for it as was with be by on not he this are "
++    "or his from at which but have an they you were her all she there would "
++    "their we him been has when who will more no if out so said what up its "
++    "about into than them can only other new some could time these two may "
++    "then do first any my now such like our over man me even most made after "
++    "also did many before must through back years where much your way well "
++    "down should because each just those people how too little state good "
++    "very make world still own see men work long get here between both life "
++    "being under never day same another know while last might us great old "
++    "year off come since against go came right used take three states "
++    "himself few house use during without again place around however home "
++    "small found thought went say part once general high upon school every "
++    "does got united left number course war until always away something fact "
++    "water though less public put think almost hand enough far took head yet "
++    "government system better set told nothing night end why called eyes "
++    "find going look asked later knock point sort care point order close "
++    "case turn problem fact group play run move live believe hold bring "
++    "happen write provide sit stand lose pay meet include continue learn "
++    "change lead understand watch follow stop create speak read allow add "
++    "spend grow open walk win offer remember love consider appear buy wait "
++    "serve die send expect build stay fall cut reach kill remain suggest "
++    "raise pass sell require report decide pull"
++).split()
++
++
++def _synthetic_token_ids(tokenizer, n_tokens: int):
++    """Build n_tokens of valid text that round-trips through the tokenizer."""
++    n_words = int(n_tokens * 1.4) + 64
++    words = random.choices(_RANDOM_WORDS, k=n_words)
++    ids = tokenizer.encode(" ".join(words), add_special_tokens=False)
++    ids = ids[:n_tokens]
++    # A truncated byte-level sequence can end mid-codepoint; drop a trailing
++    # partial token so decode -> encode is exact.
++    for _ in range(8):
++        text = tokenizer.decode(ids)
++        roundtrip = tokenizer.encode(text, add_special_tokens=False)
++        if len(roundtrip) == len(ids):
++            return ids
++        ids = ids[:len(roundtrip)] if len(roundtrip) < len(ids) else ids[:-1]
++    return ids
++
++
+ async def get_request(
+     input_requests: List[Tuple[str, int, int]],
+     request_rate: float,
+@@ -579,6 +620,16 @@
+     print("Starting initial single prompt test run...")
+     test_prompt, test_prompt_len, test_output_len, test_mm_content = (
+         input_requests[0])
++    # LOCAL PATCH (qwen4090-repo): warm up with a *different* prompt of the
++    # same length. vLLM reuses input_requests[0] for the warmup and then measures
++    # it again, which Strata's conversation cache turns into a 99 % prefix hit.
++    if backend == "openai-chat":
++        # 1K cells: keep warmup distinguishable from the measured prompt so
++        # the /metrics-side filter can drop it.
++        warm_len = 512 if test_prompt_len == 1024 else min(test_prompt_len, 2048)
++        test_prompt = "warmup " + tokenizer.decode(
++            _synthetic_token_ids(tokenizer, warm_len))
++        test_output_len = min(test_output_len, 8)
+     if backend != "openai-chat" and test_mm_content is not None:
+         # multi-modal benchmark is only available on OpenAI Chat backend.
+         raise ValueError(

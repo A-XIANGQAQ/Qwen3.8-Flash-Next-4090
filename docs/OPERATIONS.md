@@ -1,269 +1,160 @@
 # 运维手册 (Operations)
 
-> **只有一条路能跑**：v5（Strata 0.2.2 服务端 + 0.1.47 预编译引擎）。v4（FreeToken）的运行时与权重**已于 2026-10-18 删除**，
-> 回滚需要重新安装引擎——§1b 的流程保留作记录，**现在执行不了**。
-> 引擎细节见 [STRATA.md](STRATA.md)，同代版本升级见 §1c，模板见 [TEMPLATE.md](TEMPLATE.md)。
+> 当前只有 **v5.3：Strata 0.2.2 服务端 + engine 0.1.47 + DavidAU IQ3_S**。
+> 引擎细节见 [STRATA.md](STRATA.md)，升级判断见 [STRATA-UPSTREAM-2026-10-25.md](STRATA-UPSTREAM-2026-10-25.md)，
+> 模板见 [TEMPLATE.md](TEMPLATE.md)，实测见 [BENCHMARK.md](BENCHMARK.md)。
 
 ## 1. 启动 (Start)
 
 ```bash
-# ── v5（当前，Strata）──────────────────────────────
-# ⛔ **必须在你自己的终端里跑**。绝不要从 agent / CI 的工具调用里用 `setsid ... &` 起。
-#    2026-10-15 09:40 实测踩到：从 agent 的 bash 工具里起的进程，**仍落在 systemd 临时单元
-#    `dsh-subprocess-*.scope` 的 cgroup 里**——`setsid` 只脱离终端/会话，**脱不出 cgroup**。
-#    重启 dsh-web 时该 scope 被回收，server + strata + strata-vision **整组**被 SIGTERM/SIGKILL。
-#    症状极具误导性：日志只留 `stopping (Ctrl+C again to end the engine at once)`、
-#    **没有任何 traceback / CUDA / OOM** —— 那不是崩溃，是被信号停的。
-#    判据（systemd 侧才有）：
-#      journalctl -b 0 | grep -E 'dsh-subprocess.*(SIGTERM|SIGKILL)'
-#
-#    从自己终端起则落在登录会话（KillUserProcesses 默认不杀 + Linger=yes），**关掉终端也不会死**。
+# ⛔ 必须在你自己的终端里跑。绝不要从 agent / CI 的工具调用里 nohup/setsid 起：
+#    2026-10-15 实测，进程仍落在 systemd 临时单元 dsh-subprocess-*.scope 的 cgroup 里，
+#    setsid 只脱离终端/会话、脱不出 cgroup；dsh-web 重启时 server/strata/strata-vision 整组被 SIGTERM。
+#    症状：日志只有 stopping (Ctrl+C again...)，没有 traceback / CUDA / OOM。
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
-# 桌面版（含「等显存 <1000 MiB」+ 关 GUI）：bash ~/桌面/一些启动脚本/start_strata_kill_gui.sh
-# 就绪标志：日志行 "ready:"（0.1.47 实测 36 秒，0.1.45 为 39–55 秒）
-#   ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions, Anthropic: /v1/messages, context 262144 tokens)
-
-# ── 推荐：一次性 systemd 用户单元（2026-10-18 起本站生产就用这个）─────────
-# 比 nohup 强在 cgroup：单元的 cgroup 是 dsh-web.service 的**兄弟**，dsh-web 重启不会连坐；
-# 又不是开机自启（transient、无 [Install]、--collect 退出即消失，重启后照样要手动拉）。
-systemd-run --user --unit=strata-prod --collect \
-  --working-directory=~/dsh_workspace/strata/Strata \
-  bash ~/dsh_workspace/strata/run_strata.sh
-#   systemctl --user status strata-prod      # 状态
-#   journalctl --user -u strata-prod -f      # 日志
-#   systemctl --user stop strata-prod        # 停（要换桌面脚本启动前必须先停，否则 8000 被占）
-
-# ⚠️ 不要用 ./setup.sh 起服务 —— 它无参数时会自己拉起模型并【绕过 chat 模板守卫】，模板会退回原装
-# ⚠️ **当前生产模型是 DavidAU abliterated IQ3_S**，它自带 22 万字符模板，
-#    启动器里那条 froggeric 模板守卫已被移除（旧版备份 run_strata.sh.bak-undq4-20261018）。见 TROUBLESHOOTING #45
-# ⚠️ 必须先确认显存已空（见 §3），否则 cudaMalloc OOM
-
-# ── v4（FreeToken）⛔ 2026-10-18 已删除运行时与权重，下面命令仅存档，不再可用 ──
-bash scripts/archive/start_freetoken.sh        # 自动 sudo 提权 + ulimit -l unlimited + 补丁自检 + 就绪等待
-tail -f /tmp/ft.log
+# 就绪：日志行 ready:（0.1.47 实测 36 秒）
+#   ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions,
+#                                     Anthropic: /v1/messages, context 262144 tokens)
 ```
 
-- v4 就绪标志：日志行 `ready to serve`（约 **40 秒**）
-- ⚠️ **不要用 `/health` 判断就绪**——FreeToken 的 `/health` 在模型加载完成前就返回 200（上游 #537）。
-  加载期间打 `/v1/chat/completions` 会被拒。
-- ⚠️ v4 脚本必须在**普通用户**的 shell 里运行（会自己 sudo 提权）。root 外壳的 cwd 会让 spawn 出的 worker 崩溃（见 TROUBLESHOOTING）
-- 启动前 v4 脚本会自检三个本地补丁是否在位——缺任何一个直接退出并打印重打命令
+推荐一次性 systemd 用户单元（cgroup 与 dsh-web 是兄弟，但**不是开机自启**）：
+
+```bash
+systemd-run --user --unit=strata-prod --collect \
+  --property=RemainAfterExit=yes \
+  --working-directory=/path/to/strata/Strata \
+  bash /path/to/strata/run_strata.sh
+# systemctl --user status strata-prod   |  journalctl --user -u strata-prod -f
+# systemctl --user stop strata-prod
+```
+
+⚠️ **不要用 `./setup.sh` 起服务**：它会重导原装模板（大小 226745）、重写 config；
+当前模型自带 22 万字符模板，靠启动器保证不被覆盖（见 [TROUBLESHOOTING #45/#49](TROUBLESHOOTING.md)）。
+⚠️ **起之前显存必须已空**（`nvidia-smi` used <1000 MiB），否则 `cudaMalloc` OOM（[#29](TROUBLESHOOTING.md)）。
 
 ## 1a. 模式自动选择（模板内）
 
-一份模板同时做渲染修复与模式选择，规则/词表/评测全在 [TEMPLATE.md](TEMPLATE.md)。常用的三条命令：
+规则/词表/评测全在 [TEMPLATE.md](TEMPLATE.md)。常用：
 
 ```bash
-python3 patches/08_auto_check.py --set dev+val                  # 离线回归（渲染真实模板）
-python3 patches/08_auto_check.py --case "讲个笑话"               # 单条排查，带分数
-wc -c <pack>/tokenizer/chat_template.jinja                      # 249545 = v3 已装
+python3 patches/08_auto_check.py --set dev+val        # 离线回归（渲染真实模板）
+python3 patches/08_auto_check.py --case "讲个笑话"     # 单条，带分数
+wc -c <pack>/tokenizer/chat_template.jinja            # 249545 = v3
 ```
 
-判定一句话：**分数 ≥ 2 且严格高于第二名才选，否则不选**（回落 froggeric 默认）。
-线上判据：`讲个笑话` 的 prompt_tokens ≈ 2847（选了 comedy）或 11（完全没选）。
+判定：**分数 ≥2 且严格高于第二名才选，否则不选**。线上判据：`讲个笑话` 的 `prompt_tokens` ≈ 2847（选了 comedy）。
 
-## 1b. 引擎互切 (Switch / Rollback) —— ⛔ 仅存档，v4 运行时已删除
+## 1b. 引擎升级（同代最小路径）
 
-> 下面这些命令现在跑不了（`~/cherrywork/freetoken-tools` 与 `~/.venv-lsglang` 都已删除）。
-> 保留是因为"当时怎么切"本身是记录；真要回 v4 得先重装 FreeToken。
+原则：**只换服务端源码 + 引擎目录，不动模型 / pack / 模板 / config 参数，不跑 setup/update**。
+升级前先读 release 与 issue；当前判断见 [STRATA-UPSTREAM-2026-10-25.md](STRATA-UPSTREAM-2026-10-25.md)。
 
 ```bash
-# switch_engine.sh 是本站自建的一键互切脚本，**不在本仓库**（流程见下方，可自行实现）
-S=switch_engine.sh
+# ① 下载并校验（sha256 必须等于签名 feed；BUILD.json 的 archs 必须含 89）
+gh release download <tag> --repo Niko1221/Strata \
+  -p 'strata-engine-<ver>-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
+sha256sum /tmp/strata-engine-<ver>-linux-x86_64-cuda-cuda13.tar.gz
 
-bash $S B --status          # 只看当前是谁（A=v4 FreeToken, B=v5 Strata）
-bash $S B                   # 切到 v5
-bash $S A                   # 切回 v4（回滚）
+# ② 新树解压到独立目录（生产树继续跑，零停机）
+curl -L https://github.com/Niko1221/Strata/archive/refs/tags/<tag>.tar.gz \
+  | tar -xz -C strata/Strata-<tag> --strip-components=1
+mkdir -p strata/Strata-<tag>/engine
+tar -xzf /tmp/strata-engine-<ver>-...tar.gz -C strata/Strata-<tag>/engine
 
-# 或直接手工
-bash scripts/archive/start_freetoken.sh   # 回滚 v4
-bash stop_strata.sh               # 停 v5（含显存释放判据）
+# ③ 复制生产 config，只改 exe / vision.exe / cwd / log；args 逐字不动
+# ④ 停机切换（实测中断 48 秒）
+bash strata/stop_strata.sh          # 轮询到显存 <1000 MiB 才算停完
+bash strata/run_strata.sh           # 指向新树/新 config
 ```
 
-`switch_engine.sh` 的流程：停当前 → **轮询等 `nvidia-smi` used <1000 MiB** → 起目标 →
-按引擎区分的就绪判据 → **走服务入口跑真实推理探针** → 失败则自动回滚。
-⚠️ 其**真实切换 + 回滚路径尚未实测**（2026-10-13 的切换是手工做的）。
-
-## 1c. 引擎版本升级 (Upgrading to a new upstream tag)
-
-**0.2.2 起的做法（2026-10-22 实战）**：上游从 0.2.0 起发布 **Linux 预编译引擎**（签名 feed，arch 含 sm_89），
-不需要再自己编。只换两样东西：**服务端源码** + **引擎目录**，**不跑 `setup.py`**。
-
-```bash
-# ① 下载并校验（sha256 必须等于签名 feed 里的值）
-gh release download v0.2.2 --repo Niko1221/Strata \
-  -p 'strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
-sha256sum /tmp/strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz
-#   45a6df98aaf4b6b7c05087a4ab428be8df478ddcc07193a13cbaab312b85895e
-curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.2.tar.gz \
-  | tar -xz -C strata/Strata-0.2.2 --strip-components=1
-mkdir -p strata/Strata-0.2.2/engine
-tar -xzf /tmp/strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz -C strata/Strata-0.2.2/engine
-
-# ② 配置：复制生产 config，只改 exe / vision.exe / cwd / log，args 逐字不动
-# ③ 停机切换（实测中断 48 秒）
-bash strata/stop_strata.sh          # 等到显存 <1000 MiB
-bash strata/run_strata.sh           # 新启动器 run_strata_022.sh；旧的在 run_strata_0145.sh
-# ④ 验收（6 项）
-bash strata/test_strata_022.sh
-```
-
-验收要点：`/health.loaded=true`、`/props` 的 `build_info="Strata 0.1.47"` 且 `chat_template` 长度 243742、
-`讲个笑话` 的 prompt_tokens=2847、视觉请求 200、日志出现 `session is up (engine 0.1.47)`、`tool_calls` 正常。
-
-> 下面的「自建引擎」流程是 0.1.43.1 → 0.1.45 时代（2026-10-18）的做法，**只在预编译包不可用（新卡/新 CUDA）时才用**。
-
-**顺序不能变**：并行构建 → 冷启动 A/B → 达标才换二进制。**任何一步都不跑 `update.sh` / `setup.py` 主流程**。
-
-```bash
-# ① 并行构建一棵新树（生产树继续跑，零停机）
-git -C strata/Strata fetch origin --tags
-git -C strata/Strata worktree add strata/Strata-<tag> <tag>
-ln -s ../../Strata/third_party/llama.cpp strata/Strata-<tag>/third_party/llama.cpp   # 未跟踪的大目录
-#    把补丁 07 打上（行号随 tag 漂移，上下文不变）
-#    然后只调 build_engine()：<installed tree>/.venv/bin/python scripts/build_engine_upgrade.py --src strata/Strata-<tag>
-#    产物：engine/strata、engine/strata-vision、engine/libstrata_kq.so（0.1.44 起新增）、engine/BUILD.json
-
-# ② 冷启动 A/B：两臂同一份 config，只有 exe / vision.exe 指向不同目录
-bash scripts/arm_start.sh <serve-dir> <config.json> <server.log>
-python scripts/ab_probe.py --arm A            # 6×decode + 1K/32K/100K + 4 路 + 视觉
-python scripts/long_ctx_probe.py --arm A --reps 3  # 长上下文 decode 单独复测（短答案会淹没信号）
-
-# ③ 达标才换（停机约 3 分钟）
-bash strata/stop_strata.sh
-cp -a strata/Strata/engine strata/Strata/engine-<old>        # 留档，回滚用
-cp -a strata/Strata-<tag>/engine/. strata/Strata/engine/     # 整目录：kq 库也要
-git -C strata/Strata stash && git -C strata/Strata checkout <tag>
-git -C strata/Strata apply qwen4090-repo/patches/07_strata_esp_family_whitelist.patch
-bash "/path/to/start_strata_kill_gui.sh"                     # 自己的终端
-```
-
-**准入线**（任一条不过就不切）：短上下文 decode ≥ 0.97× 基线；32K/100K 的 decode 判等；
-1K/32K/100K 的 TTFT 不劣于基线；专家缓存 ≥ 31 GiB；启动后空闲显存 ≥ 1800 MiB；
-视觉三色条 3/3；4 路并发墙钟 ≤ 基线；启动 60 秒内无新 WARNING。
+**准入线（任一条不过就回滚）**：短上下文 decode ≥0.97×基线；1K/32K/100K 的 TTFT 不劣于基线；
+长上下文（≥131K）free VRAM 不出现 61→49→28→13→0 MiB 的塌陷（#3952）；专家缓存 ≥31 GiB；
+启动后空闲显存 ≥1800 MiB；视觉三色条 3/3；4 路并发无空答；启动 60 秒内无新 WARNING。
 
 **三条铁律**：
 
-1. **server.py / 引擎 / vision 必须同版本**。0.2.2 的 `setup.py` 写死 `MIN_ENGINE = (0, 1, 46)`，
-   且 `stale_binary()` 会拒绝安装「版本与源码不符」的二进制——只换其中一个会得到诡异行为。
-2. **只调 `build_engine()`，不要跑 setup 主流程**：`carry_over()` 不会合并手工加进 `args` 的选项
-   （12 个手调参数会丢）；且 setup 对大分片算 SHA-256 有已知 bug（#2902），**会删掉正确的模型分片**。
-3. **`engine/` 要整目录替换**，不能只拷 `strata` + `strata-vision`：0.1.44 起多了一个
-   `libstrata_kq.so`（K-quant prompt 内核库），漏了它等于退回旧内核。
+1. **server / engine / vision 必须同代**。0.2.2 的 `MIN_ENGINE = (0,1,46)`，`stale_binary()` 会拒绝不匹配的二进制；
+   只换一个会静默少功能（[#39](TROUBLESHOOTING.md)）。
+2. **不要跑 setup 主流程**：`carry_over()` 不合并手工 args（12 个手调参数会丢）；#2902 还会删大分片。
+3. **`engine/` 整目录替换**，不能只拷 `strata` + `strata-vision`：0.1.44 起还有 `libstrata_kq.so`。
 
-回滚见 [UPGRADE.md](UPGRADE.md) §0b.6：`engine-<old>/` 整目录拷回 + `git checkout <old tag>` + 重打补丁。
+**回滚**：停服务 → 等显存 <1000 MiB → config 指回旧 `engine/`（或整目录拷回）→ 起服务。
+旧树与旧引擎目录全程保留，不需要重下。
 
-## 2. 观察 (Observe)
-
-```bash
-# ── v5（Strata）─────────────────────────────
-tail -f strata/strata-prod.log       # 关注: Traceback / OOM / Xid / 就绪行 "ready:"
-pgrep -x strata                      # 引擎存活（精确匹配，不会自匹配）
-nvidia-smi --query-gpu=memory.used --format=csv,noheader   # 起停前后的显存判据
-free -h                              # v5 实测: 68Gi used / 198Gi buff-cache（含 mmap 的 GGUF）
-
-# ── v4（FreeToken）──────────────────────────
-python3 ft_stats.py                  # /v1/stats + cache status + nvidia-smi 一览
-curl -s localhost:8000/v1/stats      # kv/mamba 池、累计 token、ttft 均值/p95
-tail -f /tmp/ft.log                  # 关注: Traceback / OOM / Xid / swap 增长
-
-# ── 通用 ───────────────────────────────────
-curl -s localhost:8000/v1/models
-watch -n 1 nvidia-smi
-```
-
-`ft_stats.py` 与 `/v1/stats`（v4）提供的 TTFT 统计是**服务端口径**，与客户端计时不同——结论以客户端计时为准（见 BASELINE）。
-
-## 3. 停止 / 重启 (Stop / Restart)
+## 2. 观察
 
 ```bash
-# ── v5（Strata）──────────────────────────────
-bash stop_strata.sh             # 停服务端 + 引擎，并【等显存降到 <1000 MiB】才算成功
-
-# ── v4（FreeToken）───────────────────────────
-ps -eo pid,args | grep '[f]t-venv/bin/ft serve'   # 先确认真实 PID（见下方自匹配警告）
-kill <pid>
-bash scripts/archive/start_freetoken.sh        # 重启（约 40 秒）
+tail -f strata/strata-prod.log      # Traceback / OOM / Xid / verify / ready:
+pgrep -x strata                     # 引擎（精确名，不会自匹配）
+pgrep -x strata-vision              # 装了图才有
+nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv
+free -h                             # 权重 mmap + 专家驻留：used 高、swap 应为 0
+curl -s 127.0.0.1:8000/metrics      # 引擎/并发/每请求/缓存/硬件，见 §6
 ```
 
-> ⛔ **停完必须等显存真正释放再起下一个引擎。** 实测：`ft_stop.sh` 打印"干净停止"时
-> `nvidia-smi` 仍显示 **47,712 MiB 被占**，立刻起 Strata 会 `cudaMalloc ... out of memory`。
-> **判据是 `nvidia-smi --query-gpu=memory.used --format=csv,noheader` 降到 <1000 MiB，不是进程消失。**
-> （2026-10-13 漏这步 → nginx 502 五分钟。）
-> 一条命令自查：`nvidia-smi --query-gpu=memory.used --format=csv,noheader`
-
-⚠️ **`pkill -f` / `pgrep -f` 都会把「命令行里含该字符串的自己的 shell」一并匹配**——实测踩过
-（`pkill -f "ft-venv/bin/ft serve"` 会连发起它的 shell 一起杀掉）。两种稳妥写法：
-
-- `ps -eo pid,args | grep '[f]t-venv/bin/ft serve'` 拿到真实 PID 再 `kill`
-- 用引擎二进制的**精确名**匹配：Strata 就是 `pgrep -x strata`（不会自匹配）
-
-⚠️ **改参数一律走「停 + 重启」**：40 秒就能起回来，而 `ft ctl cache rebuild` 热调在上游有把服务器
-wedge 住的记录（#526，重建 OOM 后无法回滚）。
-
-## 4. 日志 (Logs)
-
-- **v5（Strata）**：`strata/strata-prod.log`（启动器重定向）。
-  两个必看行：**就绪** `ready: http://127.0.0.1:8000/v1 ... context 262144 tokens`；
-  **破限判据** `control vector mode = project, dir = per-layer, layers 4..44 (41 steered)`。
-- **v4（FreeToken）**：`/tmp/ft.log`（启动脚本指定；**每次启动截断重写——重启前先备份**）
-- v4 关键日志行：
-  - `Parsed arguments:`——**全部生效参数**，排查配置问题先看这行
-  - `PLE disk backend: io_uring, O_DIRECT`——PLE 表走磁盘后端（不占锁页内存）
-  - `Allocating 265216 tokens for KV cache, K + V = 6.26 GiB`——KV 池大小
-  - `Free memory after initialization:`——初始化后剩余显存
-  - `Prefill batch / Decode batch` + `#running-req` / `#queue-req` / `#mamba-slot: x/N`——实时负载
-  - `ready to serve`——就绪
-  - ⚠️ 日志里的 `input throughput` / `gen throughput` 是**服务内部口径**，与客户端实测差距可达数量级
-    （见 TROUBLESHOOTING #3），**不要用来做结论**
-
-## 5. 常用 curl 验证 (Sanity Checks)
+## 3. 停止 / 重启
 
 ```bash
-# 模型信息（工具客户端读这个限制长度）
-curl -s localhost:8000/v1/models
-
-# 中文请求
-curl -s localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"<served_name>","messages":[{"role":"user","content":"你好"}],"max_tokens":64,"stream":false}'
-
-# 工具调用（FreeToken 默认 tool_call_parser=qwen3_coder，无需显式传参）
-curl -s localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"<served_name>","messages":[{"role":"user","content":"北京天气？"}],"max_tokens":128,"tools":[{"type":"function","function":{"name":"get_weather","description":"查天气","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}'
-# 期望 message.tool_calls 为结构化数组（非 null）
-
-# Anthropic 兼容接口（v4 新增能力；v3 的 sglang 路线没有）
-curl -s localhost:8000/v1/messages -H 'Content-Type: application/json' -H 'anthropic-version: 2023-06-01' \
-  -d '{"model":"<served_name>","max_tokens":64,"messages":[{"role":"user","content":"你好"}]}'
+bash strata/stop_strata.sh          # 停 serve + engine，并等显存降到 <1000 MiB
 ```
 
-前缀缓存命中数可从 `usage.prompt_tokens_details.cached_tokens` 读出（启动脚本开了 `--enable-cache-report`）；
-Anthropic 格式对应 `usage.cache_read_input_tokens`。
+> ⛔ **停完必须等显存真正释放再起下一个**：进程消失 ≠ 显存释放（实测残留 47,712 MiB，
+> 立刻起会 `cudaMalloc ... out of memory`）。判据只有 `nvidia-smi` 的 used <1000 MiB。
+> ⚠️ 不要 `pkill -f "serve/server.py"`：会匹配到自己的 shell。用 `pgrep -x strata` 或
+> `ps -eo pid=,comm=,args= | awk '$2 ~ /^python/ && /[s]erve[^ ]*\/server\.py/ {print $1}'`。
 
-## 6. 边界行为 · v4 (Boundary Behavior · FreeToken)
+## 4. 日志
 
-> ⚠️ **本节整段是 v4 的调度与池化行为，不适用于 v5。** v5 的对应语义差别很大：
-> 并发是**每 slot 独立 session**（不是共享池），KV **每 slot 独立**且可流式到宿主内存
-> （`--kv k8v4 --kv-resident 32768`），**没有 mamba 槽**这套东西。见 [STRATA.md §5](STRATA.md)。
+- 就绪：`ready: http://127.0.0.1:8000/v1 ... context 262144 tokens`
+- 会话：`session is up (engine 0.1.47)`；并发：`--batch: 4 slot sessions on CUDA0`
+- 视觉：`strata serve: N MiB of VRAM free with everything loaded`，**N 必须 ≥1600**
+- 每请求：`prompt ... tokens = ... reused + ... read in ... ms (... tok/s), ... generated in ... ms (... tok/s)`
+- ⚠️ 启动器用 `> log` 会**截断**旧日志；重启前要留证据就先备份或改 `>>`
+- ⚠️ 日志里的 `done: N tokens in T s` 自相矛盾（[#3](TROUBLESHOOTING.md)），**不要用**；以客户端或 `/metrics` 为准
 
-- 上下文上限 262144；KV 是**单一共享池** 265216 tokens（启动时预分配，不随上下文伸缩）
-- 长上下文的并发上限由 **mamba 槽**决定：`slots = 4*mrr + max(4, 2*mrr) + 1`
-  | `--max-running-requests` | mamba 槽 | 可并行的长上下文路数 | 实测 |
-  |---|---|---|---|
-  | 2 | 12 | 3 路 | 显存省（配合 cache-rate 0.35 约 42.9G） |
-  | **4（本项目生产）** | **24** | **6 路** | 显存 44.4G，decode 65.0/65.3 @73K 不掉 |
+## 5. 常用 curl
 
-  > 「mrr>3 没用」是误解——mrr 直接决定并发上限。
-- 生成长度到 262144 总长 → 截断（`finish_reason=length`）
-- 多路并行时的**吐字停顿**：FreeToken 的调度里 prefill 默认无条件优先，长 prompt 的 prefill 会整块占住 GPU，
-  正在解码的那一路就「突然不吐字」——本机实测最长冻结 **17.7s**。`--decode-interleave-every 2`（本地补丁，
-  上游 PR #484）把停顿切成 4 段，最长降到 **7.5s**（总等待时间不变）。
-  ⚠️ N 必须按自己的 prompt 长度定：43K prompt 只有 6 个 prefill 块，作者在 PR 里推荐的 N=8 永远到不了阈值、完全无效。
+```bash
+curl -s 127.0.0.1:8000/v1/models
+curl -s 127.0.0.1:8000/health
+curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["build_info"],len(d["chat_template"]))'
 
-## 7. GUI / 无头主机共存 (Headless Notes)
+# 文本（OpenAI chat；服务端不支持 /v1/completions）
+curl -s 127.0.0.1:8000/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3.8-flash-next-davidau-iq3s-ablit","messages":[{"role":"user","content":"你好"}],"max_tokens":64,"stream":false}'
 
-- 126GB 权重 + 专家 banks 需 ~200GB RAM——若主机有桌面环境，建议服务运行期间关闭 GUI（LightDM 等）。
-  `scripts/archive/start_freetoken.sh` 会在检测到 lightdm 时自动停掉（`STOP_GUI=off` 可关掉该行为）
-- 远程访问：SSH local forwarding 或 loopback + 反向代理（nginx 需配 `proxy_read_timeout`，默认 60s 会掐断长请求 → 502；建议 900s）
-- 端口：只需指定 API 端口。FreeToken 内部 rendezvous 端口**自动挑空闲的**（补丁 04，
-  从 API 端口+1 起向上找，被占用就顺延并打日志）；需要固定时显式设 `FT_DIST_PORT`
+# 关思考 + 固定输出（基准里用同一套）
+#   "chat_template_kwargs":{"enable_thinking":false}
+
+# 工具调用
+curl -s 127.0.0.1:8000/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"...","messages":[{"role":"user","content":"北京天气？"}],"max_tokens":128,"tools":[{"type":"function","function":{"name":"get_weather","description":"查天气","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}'
+
+# Anthropic 兼容
+curl -s 127.0.0.1:8000/v1/messages -H 'Content-Type: application/json' -H 'anthropic-version: 2023-06-01' \
+  -d '{"model":"...","max_tokens":64,"messages":[{"role":"user","content":"你好"}]}'
+
+# 只数 token（不生成；基准校准用）
+curl -s 127.0.0.1:8000/v1/messages/count_tokens -H 'Content-Type: application/json' \
+  -d '{"model":"...","messages":[{"role":"user","content":"Hello world"}]}'
+```
+
+## 6. `/metrics`（排障与基准的引擎侧证据）
+
+| 字段 | 含义 |
+|---|---|
+| `engine.engine` / `engine.model` | 引擎版本（0.1.47）/ served name |
+| `engine.kv` / `kv_resident` / `batch_slots` | `k8v4` / 32768 / 4 |
+| `engine.expert_cache_mib` / `expert_slots` | 专家缓存；升级后低于 ~31 GiB 判定不合格 |
+| `engine.vram_free_mib` | 启动后空闲显存；应 ≥1800 |
+| `live.state` / `prompt_tokens` / `prefill_tok_s_mean` | 当下在做什么 |
+| `requests[]` | 最近 500 条：`prompt_tokens`、`reused`、`prompt_ms`、`decode_ms`、`decode_tok_s`、`hit_rate` |
+| `conversation_cache` | 命中/复用/eviction；判断缓存是否被外部流量污染 |
+| `hardware` / `history` | GPU/CPU/显存/功率，1 秒粒度 |
+
+## 7. GUI / 无头与反向代理
+
+- 桌面 GUI 与引擎抢显存：建议服务期间关 GUI（本项目启动脚本可选 `STRATA_NO_SUDO=1` 的无提权分支）。
+- 远程：SSH 转发，或 loopback + nginx；**`proxy_read_timeout` 默认 60s 会掐断长请求 → 502，建议 ≥900s**。
+- 端口：只用 `:8000`（serve 层）；引擎没有额外对外端口。
+- **不要开机自启**：用一次性 systemd 单元或手动脚本（见 §1）。
