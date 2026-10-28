@@ -151,7 +151,7 @@ CUDA error: out of memory
   静默降级——旧 server 会按「引擎太老/太新」处理，不报错，只少给功能。
 - 判据：`engine/BUILD.json` 的 `version`、`engine/strata --version`、`/props` 的 `build_info`、
   `serve/server.py` 里 `PARALLEL_MAX`、`setup.py` 里 `MIN_ENGINE` 应当指向同一代。
-  本站当前已知可用配对：**服务端 0.2.2 + 引擎 0.1.47**（`/props.build_info = "Strata 0.1.47"`）。
+  本站当前已知可用配对：**服务端 0.2.7 + 引擎 0.1.52**（`/props.build_info = "Strata 0.1.52"`）；0.2.2 + 0.1.47 保留为回滚。
 - 修法：整套换。见 [OPERATIONS.md](OPERATIONS.md) §1c。
 
 ## 🔴 40. 别让 `update.sh` / `setup.py` 碰你的模型分片

@@ -3,7 +3,7 @@
 一份面向**单卡 RTX 4090（SM89，48GB）**的 Qwen3.8-Flash-Next 部署与实测记录：让 83.86GB 的 MoE 权重
 （6B active）跑在一张消费级卡上——**权重驻内存、CPU 算 experts、GPU 算 attention/PLE/常驻层**。
 
-**当前组合 v5.3 = Strata 0.2.2（服务端）+ engine 0.1.47（预编译）+ DavidAU abliterated IQ3_S（3.5 bpw）+ 合并模板 v3。**
+**当前组合 v5.4 = Strata 0.2.7（服务端）+ engine 0.1.52（预编译）+ DavidAU abliterated IQ3_S（3.5 bpw）+ 合并模板 v3。**
 2026-10-25 用 **vLLM 官方 benchmark** 重测了 prefill / decode / 并发，原始数据在
 [`bench/results/2026-10-25/`](bench/results/2026-10-25/)。
 
@@ -61,7 +61,7 @@
 | 层 | 固定身份 |
 |---|---|
 | 模型 | `DavidAU/Qwen3.8-Flash-Next-Abliterated-…-GSQ-RCO-GGUF` → **IQ3_S**（83.86 GB / 2 shards，3.5 bpw，自带 abliteration） |
-| 引擎 | [Niko1221/Strata](https://github.com/Niko1221/Strata) **0.2.2 服务端 + 0.1.47 预编译引擎**（CUDA 13，arch 含 sm_89，sha256 与签名 feed 一致） |
+| 引擎 | [Niko1221/Strata](https://github.com/Niko1221/Strata) **0.2.7 服务端 + 0.1.52 预编译引擎**（CUDA 13，arch 含 sm_89，sha256 与签名 feed 一致 `4177c1a8…6da55c7`） |
 | 并发 / 上下文 | `--batch 4` × `--max-context 262144`（每 slot 独立 session） |
 | KV | **`k8v4` + `--kv-resident 32768`**（816 B/cell；KV 流式到宿主内存，4×256K 全放显存会 OOM） |
 | 破限 | **模型自带**（强探针 0/14、温和 0/22 拒答）；不需要 ESP 控制向量 |
@@ -70,7 +70,7 @@
 | 模式选择 | 自动（分数 ≥2 且领先第二名才选）+ `{REASON:xxx}` 手动覆盖 |
 | GPU | 单 RTX 4090 **48GB** / sm89 / TP1；引擎报告 33,889 MiB 专家缓存 / 17,417 槽 |
 
-## 快速开始（v5.3）
+## 快速开始（v5.4）
 
 完整从零步骤（模型下载、pack、PLE 分片、模板、成功判据）见 [docs/REPRODUCTION.md](docs/REPRODUCTION.md)。
 最短路径（已有模型/pack 时）：
@@ -78,36 +78,36 @@
 ```bash
 export https_proxy=http://127.0.0.1:7890
 
-# 1. 服务端源码 + 官方预编译引擎（0.2.2 / 0.1.47）
-mkdir -p strata/Strata-0.2.2
-curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.2.tar.gz \
-  | tar -xz -C strata/Strata-0.2.2 --strip-components=1
-gh release download v0.2.2 --repo Niko1221/Strata \
-  -p 'strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
-mkdir -p strata/Strata-0.2.2/engine
-tar -xzf /tmp/strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz -C strata/Strata-0.2.2/engine
-# sha256 期望 45a6df98aaf4b6b7c05087a4ab428be8df478ddcc07193a13cbaab312b85895e
+# 1. 服务端源码 + 官方预编译引擎（0.2.7 / 0.1.52）
+mkdir -p strata/Strata-0.2.7
+curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.7.tar.gz \
+  | tar -xz -C strata/Strata-0.2.7 --strip-components=1
+gh release download v0.2.7 --repo Niko1221/Strata \
+  -p 'strata-engine-0.1.52-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
+mkdir -p strata/Strata-0.2.7/engine
+tar -xzf /tmp/strata-engine-0.1.52-linux-x86_64-cuda-cuda13.tar.gz -C strata/Strata-0.2.7/engine
+# sha256 期望 4177c1a8ffc59bf66074093b22ac55ed477bcbe84f8bd12e378b0f1236da55c7
 
 # 2. 合并模板（249545 B）
 cp patches/08_qwen38_froggeric_v225_with_dau_modes.jinja \
    <Strata-data>/packs/<pack>/tokenizer/chat_template.jinja
 
-# 3. 启动（必须在你自己的终端里跑；就绪 36 秒）
+# 3. 启动（必须在你自己的终端里跑；就绪 52 秒）
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 ```
 
 ⚠️ **不要跑 `./setup.sh` / `update.sh`**：会重导原装模板（226,745 B）、重写 config（丢手调参数），
 0.1.44+ 还可能因 #2902 删模型分片。升级只换「服务端源码 + 引擎目录」。
-⚠️ 服务端 / 引擎 / vision 必须同代（0.2.2 ↔ 0.1.47）；从 agent 的 bash 工具里起进程会被 systemd cgroup 连坐。
+⚠️ 服务端 / 引擎 / vision 必须同代（0.2.7 ↔ 0.1.52）；从 agent 的 bash 工具里起进程会被 systemd cgroup 连坐。
 
-## 上游：0.2.3 / 0.2.4 要不要升？
+## 上游：0.2.3 → 0.2.7 的结论
 
-**暂缓，保持 0.2.2 + 0.1.47**（2026-10-25 只读评估，详见
-[docs/STRATA-UPSTREAM-2026-10-25.md](docs/STRATA-UPSTREAM-2026-10-25.md)）：
+**2026-10-28 已升级到 0.2.7 + 0.1.52**（只读评估与实测见
+[docs/STRATA-UPSTREAM-2026-10-28.md](docs/STRATA-UPSTREAM-2026-10-28.md)）：
 
-- 0.2.4 的 DeepSeek V4.1-Flash 走独立 `strata-dsv41` 包，**预编译不含 sm_89**；Qwen 引擎「逐字节仍是 0.1.48」。
-- 4090 + IQ3_S 的 `0.1.47→0.1.48` 受控 A/B 上游不存在；最接近的 4060 Ti 单卡 +15% 基线是 0.1.43，拆不出增量。
-- 0.1.46+ 有 sm_89 + 262144 ctx + `--spec 4` 的长上下文 VRAM 崩塌报告（#3952，open）。
+- 0.2.5 / 0.2.6 对 Qwen 单卡零增量（0.2.6 的 Qwen 引擎与 0.2.5 逐字节相同）。
+- 0.2.7 是 0.2.2 之后第一个改到 sm_89 的版本：**结果 bit-for-bit 不变的实测速度表** + 会话缓存/读表等待等引擎修复。
+- 实测：停机 63 s、ready 52 s、VRAM 46,441 MiB、模板 243,742 chars、`build_info "Strata 0.1.52"`、Anthropic adaptive effort 200。
 - 升级阈值 / 最小风险步骤 / 回滚：见文档 §6。
 
 ## 边界与未验证

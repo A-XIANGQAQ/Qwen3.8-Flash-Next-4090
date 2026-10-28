@@ -14,7 +14,7 @@
 | 项 | 值 |
 |---|---|
 | 主机 | 单 RTX 4090 **48GB**（sm_89），38 核 / 76 线程，247GB RAM |
-| 引擎 | Strata **0.2.2** 服务端 + **engine 0.1.47** |
+| 引擎 | Strata **0.2.2** 服务端 + **engine 0.1.47**（2026-10-25 当时版本；v5.4 已升 0.2.7/0.1.52） |
 | 模型 | DavidAU Qwen3.8-Flash-Next abliterated **IQ3_S**（83.86GB，2 shards，3.5 bpw） |
 | 服务地址 | `127.0.0.1:8000`，`/v1/chat/completions` |
 | 并发 / 上下文 | `--batch 4`，`--max-context 262144` |

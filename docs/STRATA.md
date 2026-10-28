@@ -4,7 +4,7 @@
 一个自带 C++/CUDA 引擎，复用 llama.cpp 的 ggml/gguf-py/mtmd，做 MoE 专家分层（VRAM/RAM/SSD）、
 conversation cache、KV 流式与 MTP 投机解码。
 
-**当前固定身份**：Strata **0.2.2** 服务端 + **engine 0.1.47**（预编译，arch 含 sm_89）+ DavidAU IQ3_S。
+**当前固定身份**：Strata **0.2.7** 服务端 + **engine 0.1.52**（预编译，arch 含 sm_89）+ DavidAU IQ3_S。
 版本演进见 [HISTORY.md](HISTORY.md)，实测见 [BENCHMARK.md](BENCHMARK.md)，升级判断见
 [STRATA-UPSTREAM-2026-10-25.md](STRATA-UPSTREAM-2026-10-25.md)。
 
@@ -39,14 +39,14 @@ conversation cache、KV 流式与 MTP 投机解码。
 
 ## 3. 获取与版本配对
 
-0.2.0 起上游发 **Linux 预编译引擎**（0.1.47 的 `BUILD.json`: `archs [75,86,89,120]`, CUDA 13.0），
+0.2.0 起上游发 **Linux 预编译引擎**（0.1.52 的 `BUILD.json`: `archs [75,86,89,120]`, CUDA 13.0），
 不再需要自建；但**不跑 `setup.sh`**：
 
 - setup 会从 GGUF 重导原装模板（226,745 B）→ 覆盖合并模板
 - `carry_over()` 会重写 run config，**手工加进 `args` 的 12 个参数不会合并**
 - 0.1.44+ 的分片 SHA 校验有 #2902（大分片误判并删文件）
 
-**必须整代配对**：`serve/server.py`（0.2.2）+ `engine/strata` + `engine/strata-vision`（0.1.47）同代。
+**必须整代配对**：`serve/server.py`（0.2.7）+ `engine/strata` + `engine/strata-vision`（0.1.52）同代。
 只换其中一个不报错，但会静默降级（[TROUBLESHOOTING #39](TROUBLESHOOTING.md)）。
 
 ## 4. 关键参数
@@ -120,14 +120,14 @@ conversation cache、KV 流式与 MTP 投机解码。
 启动/停止/升级：[OPERATIONS.md](OPERATIONS.md)。三层判据缺一不可：
 
 1. 进程：`pgrep -x strata` + `:8000` 在听
-2. 版本/模板：`/props.build_info == "Strata 0.1.47"`，`chat_template` 长度 **243742**
+2. 版本/模板：`/props.build_info == "Strata 0.1.52"`，`chat_template` 长度 **243742**
 3. 端到端：一条中文请求正文可读；`/metrics` 的 `live.state` 回到 `idle`
 
 破限判据：当前模型**不该**出现 ESP 控制向量行（那是 UD-Q4_K_XL 路线）。
 
 ## 11. 已验证 / 未验证
 
-**已在 v5.3（0.2.2 + 0.1.47）上验证**：
+**已在 v5.4（0.2.7 + 0.1.52）上验证**：
 
 - 1K / 8K / 32K / 64K / 128K / 260K prefill 与 1K / 32K / 128K / 260K decode，2–4 路并发
   （2026-10-25，vLLM 口径，见 [BENCHMARK.md](BENCHMARK.md)）

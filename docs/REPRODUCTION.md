@@ -1,6 +1,6 @@
 # 完整复现 (Full Reproduction)
 
-从一台干净的 Linux 机器复现 **v5.3：Strata 0.2.2 服务端 + engine 0.1.47 + DavidAU IQ3_S**。
+从一台干净的 Linux 机器复现 **v5.4：Strata 0.2.7 服务端 + engine 0.1.52 + DavidAU IQ3_S**。
 只有这一条路线；v1–v4 的运行时已删除，历史见 [HISTORY.md](HISTORY.md)。
 
 ## 1. 硬件要求
@@ -20,26 +20,26 @@
 
 ## 3. 服务端与引擎
 
-0.2.0 起上游发 **Linux 预编译引擎**（0.1.47 的 `BUILD.json` arch 含 `75/86/89/120`）。**不要跑 `setup.sh`**：
+0.2.0 起上游发 **Linux 预编译引擎**（0.1.52 的 `BUILD.json` arch 含 `75/86/89/120`，vision 同）。**不要跑 `setup.sh`**：
 它会重导模板、重写 run config，0.1.44+ 还可能因 #2902 删模型分片。
 
 ```bash
 export https_proxy=http://127.0.0.1:7890        # 本机访问 GitHub 需要
 
-# 服务端源码（tag v0.2.2，不需要编译）
-mkdir -p strata/Strata-0.2.2
-curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.2.tar.gz \
-  | tar -xz -C strata/Strata-0.2.2 --strip-components=1
+# 服务端源码（tag v0.2.7，不需要编译）
+mkdir -p strata/Strata-0.2.7
+curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.7.tar.gz \
+  | tar -xz -C strata/Strata-0.2.7 --strip-components=1
 
 # 预编译引擎（CUDA 13；sha256 必须与签名 feed 一致）
-gh release download v0.2.2 --repo Niko1221/Strata \
-  -p 'strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
-sha256sum /tmp/strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz
-#   45a6df98aaf4b6b7c05087a4ab428be8df478ddcc07193a13cbaab312b85895e
-mkdir -p strata/Strata-0.2.2/engine
-tar -xzf /tmp/strata-engine-0.1.47-linux-x86_64-cuda-cuda13.tar.gz \
-  -C strata/Strata-0.2.2/engine
-strata/Strata-0.2.2/engine/strata --version       # 期望：strata 0.1.47
+gh release download v0.2.7 --repo Niko1221/Strata \
+  -p 'strata-engine-0.1.52-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
+sha256sum /tmp/strata-engine-0.1.52-linux-x86_64-cuda-cuda13.tar.gz
+#   4177c1a8ffc59bf66074093b22ac55ed477bcbe84f8bd12e378b0f1236da55c7
+mkdir -p strata/Strata-0.2.7/engine
+tar -xzf /tmp/strata-engine-0.1.52-linux-x86_64-cuda-cuda13.tar.gz \
+  -C strata/Strata-0.2.7/engine
+strata/Strata-0.2.7/engine/strata --version       # 期望：strata 0.1.52
 ```
 
 引擎包自带 cuBLAS/cuDART（rpath），**不需要** `LD_LIBRARY_PATH`。Python 依赖：
