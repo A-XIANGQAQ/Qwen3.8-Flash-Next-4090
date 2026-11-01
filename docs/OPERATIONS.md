@@ -1,6 +1,6 @@
 # 运维手册 (Operations)
 
-> 当前只有 **v5.4：Strata 0.2.7 服务端 + engine 0.1.52 + DavidAU IQ3_S**。
+> 当前只有 **v5.5：Strata 0.2.9 服务端 + engine 0.1.55 + DavidAU IQ3_S**。
 > 引擎细节见 [STRATA.md](STRATA.md)，升级判断见 [STRATA-UPSTREAM-2026-10-28.md](STRATA-UPSTREAM-2026-10-28.md)，
 > 模板见 [TEMPLATE.md](TEMPLATE.md)，实测见 [BENCHMARK.md](BENCHMARK.md)。
 
@@ -12,7 +12,7 @@
 #    setsid 只脱离终端/会话、脱不出 cgroup；dsh-web 重启时 server/strata/strata-vision 整组被 SIGTERM。
 #    症状：日志只有 stopping (Ctrl+C again...)，没有 traceback / CUDA / OOM。
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
-# 就绪：日志行 ready:（0.1.52 实测 52 秒）
+# 就绪：日志行 ready:（0.1.55 实测 38 秒：09:41:07 起进程 → 09:41:45 loaded）
 #   ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions,
 #                                     Anthropic: /v1/messages, context 262144 tokens)
 ```
@@ -73,13 +73,28 @@ bash strata/run_strata.sh           # 指向新树/新 config
 
 **三条铁律**：
 
-1. **server / engine / vision 必须同代**。0.2.7 的 `MIN_ENGINE` 仍是 `(0,1,46)`（只在 setup.py 校验；serve 侧无版本门控），但新引擎特性只在 0.1.52；
+1. **server / engine / vision 必须同代**。0.2.9 的 `MIN_ENGINE` 仍是 `(0,1,46)`（只在 setup.py 校验；serve 侧无版本门控），但新引擎特性只在 0.1.55；
    只换一个会静默少功能（[#39](TROUBLESHOOTING.md)）。
 2. **不要跑 setup 主流程**：`carry_over()` 不合并手工 args（12 个手调参数会丢）；#2902 还会删大分片。
 3. **`engine/` 整目录替换**，不能只拷 `strata` + `strata-vision`：0.1.44 起还有 `libstrata_kq.so`。
 
 **回滚**：停服务 → 等显存 <1000 MiB → config 指回旧 `engine/`（或整目录拷回）→ 起服务。
 旧树与旧引擎目录全程保留，不需要重下。
+
+### 1.1 0.2.9 起服务端会自动塞 11 个环境变量（要知道，不然会误判"参数没生效"）
+
+`serve/server.py` 在起引擎前用 `env.setdefault()` 补默认值，**自己设过的值永远优先**：
+
+| 触发条件 | 被设的变量 | 关掉的方法 |
+|---|---|---|
+| Linux + `--batch`/`--parallel` ≥2 + CUDA Qwen 引擎 | `STRATA_CKPT_POOL=1`、`STRATA_CKPT_POOL_READY=4`、`STRATA_SLOT_CKPT_MOVE=1`、`STRATA_SLOT_COPY_DIRECT=1`、`STRATA_SLOT_COPY_BATCHSYNC=1`、`STRATA_BATCH_GDN_GROUPS=1`、`STRATA_BATCH_ATTN_ROWS=1`、`STRATA_BATCH_SELF_COMMIT=1`、`STRATA_QSA_SLOTS=1` | 配置 `env` 或启动器里把任意一个设 `0` |
+| Linux + `arch=qwen4exp` + 非 HIP/SYCL/Metal | `STRATA_GDN_TC=1`、`STRATA_GDN_CONVL2=2` | `STRATA_GDN_TC=0` / `STRATA_GDN_CONVL2=0` |
+
+验证（只看引擎进程自己的环境，不看 shell）：
+
+```bash
+EPID=$(pgrep -x strata); tr '\0' '\n' < /proc/$EPID/environ | grep -E 'STRATA_(CKPT_POOL|QSA_SLOTS|GDN_)'
+```
 
 ## 2. 观察
 
@@ -106,7 +121,7 @@ bash strata/stop_strata.sh          # 停 serve + engine，并等显存降到 <1
 ## 4. 日志
 
 - 就绪：`ready: http://127.0.0.1:8000/v1 ... context 262144 tokens`
-- 会话：`session is up (engine 0.1.52)`；并发：`--batch: 4 slot sessions on CUDA0`
+- 会话：`session is up (engine 0.1.55)`；并发：`--batch: 4 slot sessions on CUDA0`
 - 视觉：`strata serve: N MiB of VRAM free with everything loaded`，**N 必须 ≥1600**
 - 每请求：`prompt ... tokens = ... reused + ... read in ... ms (... tok/s), ... generated in ... ms (... tok/s)`
 - ⚠️ 启动器用 `> log` 会**截断**旧日志；重启前要留证据就先备份或改 `>>`
@@ -143,7 +158,7 @@ curl -s 127.0.0.1:8000/v1/messages/count_tokens -H 'Content-Type: application/js
 
 | 字段 | 含义 |
 |---|---|
-| `engine.engine` / `engine.model` | 引擎版本（0.1.52）/ served name |
+| `engine.engine` / `engine.model` | 引擎版本（0.1.55）/ served name |
 | `engine.kv` / `kv_resident` / `batch_slots` | `k8v4` / 32768 / 4 |
 | `engine.expert_cache_mib` / `expert_slots` | 专家缓存；升级后低于 ~31 GiB 判定不合格 |
 | `engine.vram_free_mib` | 启动后空闲显存；应 ≥1800 |
