@@ -6,7 +6,8 @@
 
 | 版本 | 时间 | 引擎 / 权重 | 一句话结果 | 状态 |
 |---|---|---|---|---|
-| **v5.5** | 2026-11-01 | **Strata 0.2.9 + engine 0.1.55** / DavidAU IQ3_S（3.5 bpw） | 当前生产；第一个"默认开性能开关"的版本（并行栈 9 项 + GDN 张量核），验收 21/21，见 [STRATA-UPSTREAM-2026-11-01.md](STRATA-UPSTREAM-2026-11-01.md) | ✅ 当前 |
+| **v5.6** | 2026-11-03 | **Strata 0.2.10 + engine 0.1.56** / DavidAU IQ3_S（3.5 bpw） | 当前生产；速度不变（4 并发继续 MTP，**不启用 DFlash2**），换的是工具调用/惩罚窗口/停放会话等修复；停机 47 s，验收 23/23，见 [STRATA-UPSTREAM-2026-11-03.md](STRATA-UPSTREAM-2026-11-03.md) | ✅ 当前 |
+| v5.5 | 2026-11-01 | Strata 0.2.9 + engine 0.1.55 / DavidAU IQ3_S | 第一个"默认开性能开关"的版本（并行栈 9 项 + GDN 张量核）；停机 47 s，验收 21/21 | 被 v5.6 取代 |
 | v5.4 | 2026-10-28 | Strata 0.2.7 + engine 0.1.52 / DavidAU IQ3_S | sm_89 实测速度表（结果 bit-for-bit 不变）+ 会话缓存/读表修复；停机 63 s | 被 v5.5 取代 |
 | v5.3 | 2026-10-22 | Strata 0.2.2 + engine 0.1.47 / DavidAU IQ3_S（3.5 bpw） | 2026-10-25 用 vLLM 基准复测，见 [BENCHMARK.md](BENCHMARK.md) | 被 v5.4 取代 |
 | v5.2 | 2026-10-18 | Strata 0.1.45 / DavidAU IQ3_S | 换模型：decode +10%、1K TTFT −49%、32K/100K decode +34%/+31%；拒答 4.55%→0% | 被 v5.3 取代 |
@@ -17,15 +18,21 @@
 | v2 | 2026-09-14 | Lsglang 0.5.19-lkmoe + PR #37500 | 首次在单 4090 上跑通 Flash-Next | ⛔ 运行时已删 |
 | v1 | — | Lsglang 1.4.13 + lk_moe 2.4.0 | 早期能起服务，长上下文不可用 | ⛔ 运行时已删 |
 
-## 为什么从 v5.3 一路走到 v5.5
+## 为什么从 v5.3 一路走到 v5.6
 
 - **v5.4（0.2.7）**：0.2.3–0.2.6 对 Qwen 单卡无增量（0.2.6 的 Qwen 引擎与 0.2.5 逐字节相同）；0.2.7 是 0.2.2 之后第一个动 sm_89 的版本
   （实测速度表，结果 bit-for-bit 不变）+ `#1503` 会话缓存跨会话、`#3602` 读表挂死等修复。见 [STRATA-UPSTREAM-2026-10-28.md](STRATA-UPSTREAM-2026-10-28.md)。
 - **v5.5（0.2.9）**：0.2.8 修工具调用（1462 轮 agent 测试 92.9% → 98.3% 按意图读对）；0.2.9 把两个性能栈改成默认开，且都命中本机：
   Linux CUDA + `--batch ≥2` 的**并行请求栈**（9 个 `STRATA_*`，上游 8 并发 1.45×）、Linux CUDA Qwen 的 **GDN 张量核 prompt 内核**（prompt +4~6%）。
   其余 0.2.8/0.2.9 内容（Strix Halo、Intel Arc、四卡 Radeon、DGX Spark、Mac、12 GB 卡路由回滚）与本机无关。见 [STRATA-UPSTREAM-2026-11-01.md](STRATA-UPSTREAM-2026-11-01.md)。
-- **遗留**：`#3952`（sm_89 + 262144 ctx + `--spec 4` 的 VRAM 崩塌报告）仍 open；我们靠 `--vram-reserve-mib 2560` + `--kv-resident 32768` 维持 2,487 MiB 余量。
-- **没做严格的交错 A/B**：两代引擎各需一次重启，生产中断代价大于 5% 量级的收益；现有数字只能说明"没有可见回退"。
+- **v5.6（0.2.10）**：**性能上零收益，纯换修复**。头部功能 DFlash2 与 4 并发互斥（Auto 在 `--batch ≥2` 时一律选 MTP，DFlash2 一次只答一个请求），
+  全卡切分引擎要「恰好两张 sm86/sm120 NVIDIA」或「四张 R9700」，其余（8 GB/128K、ISTA-DAS Coder、Mac DeepSeek 图、RTX 50 CUDA12 首启）都无关。
+  真正拿到的是：`#4590` Qwen 惩罚窗口不再数 prompt 尾部 token（新任务复读旧 JSON）、`#4677` 停放会话不再偶发被拒/重读 6% prompt、
+  `#4663/#4700` 工具"用过的算已声明"扩到 **Anthropic 路由**（DSH 走的就是 `anthropic-messages`）、`#4838` `/v1/messages` 溢出改用 Anthropic 措辞、`#4701/#4751` write 截断与 `tools.write` 归一化。
+  见 [STRATA-UPSTREAM-2026-11-03.md](STRATA-UPSTREAM-2026-11-03.md)。
+- **遗留**：`#3952`（sm_89 + 262144 ctx + `--spec 4` 的 VRAM 崩塌报告）仍 open；我们靠 `--vram-reserve-mib 2560` + `--kv-resident 32768` 维持 ~2,480 MiB 余量。
+  `PLE table mlock failed` 仍在（systemd 单元 `LimitMEMLOCK` 只有 8 MiB；属于 PINNED 路径之外的锦上添花，不影响服务）。
+- **没做严格的交错 A/B**：每代引擎各需一次重启，生产中断代价大于 5% 量级的收益；现有数字只能说明"没有可见回退"。
 
 ## 已删除的东西
 
