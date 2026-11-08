@@ -1,6 +1,6 @@
 # 完整复现 (Full Reproduction)
 
-从一台干净的 Linux 机器复现 **v5.7：Strata 0.2.11 服务端 + engine 0.1.57 + DavidAU IQ3_S**。
+从一台干净的 Linux 机器复现 **v5.8：Strata 0.2.12 服务端 + engine 0.1.58 + DavidAU IQ3_S**。
 只有这一条路线；v1–v4 的运行时已删除，历史见 [HISTORY.md](HISTORY.md)。
 
 ## 1. 硬件要求
@@ -20,33 +20,33 @@
 
 ## 3. 服务端与引擎
 
-0.2.0 起上游发 **Linux 预编译引擎**（0.1.57 的 `BUILD.json` arch 含 `75/86/89/120`，vision 同）。**不要跑 `setup.sh`**：
+0.2.0 起上游发 **Linux 预编译引擎**（0.1.58 的 `BUILD.json` arch 含 `75/86/89/120`，vision 同）。**不要跑 `setup.sh`**：
 它会重导模板、重写 run config，0.1.44+ 还可能因 #2902 删模型分片。
 
 ```bash
 export https_proxy=http://127.0.0.1:7890        # 本机访问 GitHub 需要
 
-# 服务端源码（tag v0.2.11，不需要编译）
-mkdir -p strata/Strata-0.2.11
-curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.11.tar.gz \
-  | tar -xz -C strata/Strata-0.2.11 --strip-components=1
+# 服务端源码（tag v0.2.12，不需要编译）
+mkdir -p strata/Strata-0.2.12
+curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.12.tar.gz \
+  | tar -xz -C strata/Strata-0.2.12 --strip-components=1
 
 # 预编译引擎（CUDA 13；sha256 必须与签名 feed 一致）
-gh release download v0.2.11 --repo Niko1221/Strata \
-  -p 'strata-engine-0.1.57-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
-sha256sum /tmp/strata-engine-0.1.57-linux-x86_64-cuda-cuda13.tar.gz
-#   cc58226bffc12216a5a2e6019dfdbf4896042500df132cc3fa3c72a2388a228b
-mkdir -p strata/Strata-0.2.11/engine
-tar -xzf /tmp/strata-engine-0.1.57-linux-x86_64-cuda-cuda13.tar.gz \
-  -C strata/Strata-0.2.11/engine
-strata/Strata-0.2.11/engine/strata --version       # 期望：strata 0.1.57
+gh release download v0.2.12 --repo Niko1221/Strata \
+  -p 'strata-engine-0.1.58-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
+sha256sum /tmp/strata-engine-0.1.58-linux-x86_64-cuda-cuda13.tar.gz
+#   bbbfa8260125b94591cae30747cb0e4a9cee26d9cb0b2e284e33000c91509d54
+mkdir -p strata/Strata-0.2.12/engine
+tar -xzf /tmp/strata-engine-0.1.58-linux-x86_64-cuda-cuda13.tar.gz \
+  -C strata/Strata-0.2.12/engine
+strata/Strata-0.2.12/engine/strata --version       # 期望：strata 0.1.58
 ```
 
 引擎包自带 cuBLAS/cuDART（rpath），**不需要** `LD_LIBRARY_PATH`。Python 依赖：
 
 ```bash
 python3.12 -m venv strata/venv                  # 路径可自定
-strata/venv/bin/pip install -r strata/Strata-0.2.2/requirements.txt
+strata/venv/bin/pip install -r strata/Strata-0.2.12/requirements.txt
 ```
 
 ## 4. 模型（IQ3_S，2 shards）
@@ -68,10 +68,10 @@ pack 是「GGUF 权重 + tokenizer + 专家 profile」的布局，由 Strata 自
 ```bash
 # 先确认 PLE 张量在哪一片：iq_pack 把 per_layer_token_embd.weight 留在 GGUF 里，
 # 引擎靠 --ple-gguf 去该分片读；它不一定在 shard1。
-python3 scripts/find_ple_shard.py --strata strata/Strata-0.2.2 \
+python3 scripts/find_ple_shard.py --strata strata/Strata-0.2.12 \
   /path/to/...-00001-of-00002.gguf /path/to/...-00002-of-00002.gguf
 
-strata/venv/bin/python strata/Strata-0.2.2/tools/iq_pack.py \
+strata/venv/bin/python strata/Strata-0.2.12/tools/iq_pack.py \
   --gguf /path/to/...-00001-of-00002.gguf \
   --out  /path/to/Strata-data/packs/davidau-abliterated-iq3_s \
   --compat-bf16
@@ -120,7 +120,7 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 #                                     Anthropic: /v1/messages, context 262144 tokens)
 curl -s 127.0.0.1:8000/health
 curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["build_info"], len(d["chat_template"]))'
-#   期望：Strata 0.1.47 243742
+#   期望：Strata 0.1.58 243742
 ```
 
 ⚠️ 起之前确认显存已空：`nvidia-smi --query-gpu=memory.used --format=csv,noheader` 轮询到 **<1000 MiB**，
@@ -130,12 +130,12 @@ curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;d=json.load(sys.stdin
 ## 8. 成功判据（v5.3）
 
 - [ ] `pgrep -x strata` 有结果；`:8000` 在听；`/health.loaded == true`
-- [ ] `/props.build_info == "Strata 0.1.47"`，`chat_template` 长度 **243742**
+- [ ] `/props.build_info == "Strata 0.1.58"`，`chat_template` 长度 **243742**
 - [ ] 显存约 **46,303 / 49,140 MiB**（含 vision；`--vram-reserve-mib 2560`）
 - [ ] 一条中文请求正文可读、无乱码
 - [ ] 自动选模式：`python3 patches/08_auto_check.py --set dev+val` → dev 95.9% / val 90.0%
 - [ ] 基准冒烟：`bench/run_matrix.py --only P8K`（见 [BENCHMARK.md](BENCHMARK.md)）
-- [ ] 0.2.2 服务端 + 0.1.47 引擎是已验证配对（见 [TROUBLESHOOTING #39](TROUBLESHOOTING.md)）
+- [ ] 0.2.12 服务端 + 0.1.58 引擎是已验证配对（见 [TROUBLESHOOTING #39](TROUBLESHOOTING.md)）
 
 ## 不在默认范围
 

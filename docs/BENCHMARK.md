@@ -14,18 +14,18 @@
 | 项 | 值 |
 |---|---|
 | 主机 | 单 RTX 4090 **48GB**（sm_89），38 核 / 76 线程，247GB RAM |
-| 引擎 | Strata **0.2.2** 服务端 + **engine 0.1.47**（2026-10-25 当时版本；v5.7 已升 0.2.11/0.1.57） |
+| 引擎 | Strata **0.2.2** 服务端 + **engine 0.1.47**（2026-10-25 当时版本；v5.8 已升 0.2.12/0.1.58） |
 | 模型 | DavidAU Qwen3.8-Flash-Next abliterated **IQ3_S**（83.86GB，2 shards，3.5 bpw） |
 | 服务地址 | `127.0.0.1:8000`，`/v1/chat/completions` |
 | 并发 / 上下文 | `--batch 4`，`--max-context 262144` |
 | KV | `--kv k8v4 --kv-resident 32768` |
 | 投机 | `--spec 4 --spec-min-p 0.5 --batch-mtp` |
 | prefill / 显存 | `--prefill auto:32768`，`--vram-reserve-mib 2560`，`--vision` |
-| 专家缓存 | **33,605 MiB / 17,284 槽**（`/metrics.engine.expert_cache_mib` / `expert_slots`，0.1.57 实测；0.1.55 是 17,285 槽，0.1.52 是 33,889 MiB / 17,417 槽，0.1.45 是 32.28 GiB / 11054） |
+| 专家缓存 | **33,603 MiB / 17,283 槽**（`/metrics.engine.expert_cache_mib` / `expert_slots`，0.1.58 实测；0.1.55 是 17,285 槽，0.1.52 是 33,889 MiB / 17,417 槽，0.1.45 是 32.28 GiB / 11054） |
 | 启动后空闲显存 | 2,231 MiB |
 | 测量窗口 | 2026-10-25 13:31–13:39（服务未重启、未停服），`live.state` 全程 idle，`engine_cache_reused_ratio = 0` |
 
-配置原文（args 逐字）见生产 config `strata-davidau-iq3_s-022.json`；`--batch 4` 由 serve 层补齐。
+配置原文（args 逐字）见生产 config `strata-davidau-iq3_s-0212.json`；`--batch 4` 由 serve 层补齐。
 
 ## 2. 方法
 
