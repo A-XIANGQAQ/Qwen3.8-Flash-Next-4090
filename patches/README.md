@@ -1,10 +1,13 @@
 # 补丁索引
 
-当前只有 **08 系列**在生产：合并模板 + 自动选模式。**服务端代码一行没改。**
+**v5.9 起生产模板是 `froggeric_v22.5.jinja`（纯 froggeric，28,234 B / 28,226 字符）。**
+`08` 系列是 v5.3–v5.8（DavidAU IQ3_S）的合并模板 + 自动选模式，已退役、仅供历史复现。
+补丁只改模板/配置层，**服务端代码一行没改**。
 
 | 文件 | 用途 |
 |---|---|
-| `08_qwen38_froggeric_v225_with_dau_modes.jinja` | **生产模板**（249,545 B）：froggeric v22.5 + 29 段模式正文 + 8 个 xhigh 组合键 + 自动选模式 v3 |
+| `froggeric_v22.5.jinja` | **当前生产模板**（28,234 B / 28,226 字符）：上游 froggeric v22.5 原版，未改一字 |
+| `08_qwen38_froggeric_v225_with_dau_modes.jinja` | 退役（v5.3–v5.8 生产，249,545 B）：froggeric v22.5 + 29 段模式正文 + 8 个 xhigh 组合键 + 自动选模式 v3 |
 | `08_merge_template.py` | 生成器；`MODE_LEX` 是自动选择的词表 |
 | `08_qwen38_froggeric_v225_with_dau_modes.lexicon.json` | 词表快照，供评测工具读 |
 | `08_auto_check.py` | 渲染真实模板认模式：`--set dev+val` / `--explain` / `--case` |

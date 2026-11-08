@@ -89,6 +89,9 @@ strata prefill: FP16 weight cache 0 MiB (the card keeps 3072 MiB free;
 
 ## 6. 文件清单与回滚
 
+> ⚠️ 本节写于当天下午；当晚按用户要求删除了 IQ3_S、旧 pack 与 0.2.2–0.2.11 旧树，
+> 因此文中的 `run_strata_0211.sh` 等回滚脚本已不存在。当前回滚口径见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md) §12。
+
 新文件：
 
 - `strata/Strata-0.2.12/`（serve/ + strata_control/ + tools/ + strata_cli/ 503 文件逐一校验；engine/ 来自官方包）

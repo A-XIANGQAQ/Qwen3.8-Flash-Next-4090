@@ -1,6 +1,6 @@
 # 排障手册 (Troubleshooting)
 
-> 只保留 **v5.3（Strata 0.2.2 + engine 0.1.47 + DavidAU IQ3_S）** 仍适用的条目。
+> 只保留 **v5.9（Strata 0.2.12 + engine 0.1.58 + unsloth UD-Q4_K_XL）** 仍适用的条目。
 > v1–v4 的坑（编号 1–10、13–17、19–28）已随运行时删除，需要时看 git 历史。
 > 严重度：🔴 会停服 / 🟡 性能或质量受损 / 🔵 认知陷阱 / 🟢 测量与操作习惯。
 
@@ -151,7 +151,7 @@ CUDA error: out of memory
   静默降级——旧 server 会按「引擎太老/太新」处理，不报错，只少给功能。
 - 判据：`engine/BUILD.json` 的 `version`、`engine/strata --version`、`/props` 的 `build_info`、
   `serve/server.py` 里 `PARALLEL_MAX`、`setup.py` 里 `MIN_ENGINE` 应当指向同一代。
-  本站当前已知可用配对：**服务端 0.2.12 + 引擎 0.1.58**（`/props.build_info = "Strata 0.1.58"`）；0.2.11 + 0.1.57 保留为回滚。
+  本站当前已知可用配对：**服务端 0.2.12 + 引擎 0.1.58**（`/props.build_info = "Strata 0.1.58"`）；0.2.11 + 0.1.57 曾验证可用，但旧树已在 2026-11-08 删除，回退需重下。
 - 修法：整套换。见 [OPERATIONS.md](OPERATIONS.md) §1c。
 
 ## 🔴 40. 别让 `update.sh` / `setup.py` 碰你的模型分片
@@ -211,6 +211,7 @@ python3 scripts/find_ple_shard.py --strata strata/Strata <shard1.gguf> <shard2.g
 ```
 
 写错分片的症状是启动就失败（不是慢，也不是 OOM）。⇒ `--ple-gguf` 指到含 PLE 的那一片。
+v3.1 的 UD-Q4_K_XL 是 **`-00004-of-00004`**（IQ4_NL，28.8 GB，`shape [160, 320001536]`）；shard1 只有 10.9 MB metadata。
 
 ## 🔴 44. 给第三方/微调 GGUF 建 pack：只调 `iq_pack.py`，别跑 setup
 
@@ -219,8 +220,11 @@ python3 scripts/find_ple_shard.py --strata strata/Strata <shard1.gguf> <shard2.g
 ```
 
 - **必须等两片都下完**（缺片直接报错，不会悄悄跳过）。
-- `--compat-bf16` 的转换量取决于这个 quant 自己怎么存小投影：DavidAU 的 IQ3_S 实测
-  **`compat-bf16: 0 tensors, 0.00 GiB`**（本来就是 BF16/F16）；Unsloth 的 UD-Q4_K_XL 则需要转。
+- **必须用 `Strata/.venv/bin/python`**：`iq_pack.py` 末尾用 `sys.executable` 调 `strata_tokenizer.py`，
+  系统 python 3.14 没有 `regex` 会直接失败；而 `native_experts.txt` 是最后写的完成标记 ⇒ 其余文件都在、
+  看起来只差一个，实际 pack 不可用。
+- `--compat-bf16` 的转换量取决于这个 quant 怎么存小投影：DavidAU IQ3_S 是 **0 tensors / 0.00 GiB**（本来就 BF16/F16）；
+  官方 UD-Q4_K_XL 是 **195 张量 / 1.20 GiB**。
   **0 个张量意味着这一层没有额外量化损失**，是好消息不是漏做。
 - 打包会从 GGUF 导出**它自己的 tokenizer 与 chat 模板**到 `<pack>/tokenizer/`。
 - 别用 setup 主流程：`carry_over()` 会丢手调参数，且 setup 的 SHA-256 校验在大分片上有 bug（#2902）。
@@ -298,65 +302,37 @@ systemd-run --user --unit=strata-prod --collect \
 
 ⇒ **标签后面必须跟真正的问题。**（自动选择不改变这一点：它只挑模式，不替你提问。）
 
-## 🔴 49. 自定义/合并的 chat 模板被 `setup.sh` 冲掉
+## 🔴 49. 自定义 chat 模板被 `setup.sh` 冲掉
 
-`setup.sh` 每次都会从 GGUF **重新导出** `tokenizer.chat_template.jinja`；手工替换的模板（froggeric、
-或本仓库的[合并模板](../patches/08_qwen38_froggeric_v225_with_dau_modes.jinja)）**必被覆盖**，而且不报错，
-只表现为"模式突然不生效了"。
+`setup.sh` 每次都会从 GGUF **重新导出** `tokenizer.chat_template.jinja`；手工换上的 froggeric 模板**必被覆盖**，
+而且不报错，只表现为"reasoning effort / 工具调用行为突然变了"。
 
 判据：
 
 ```bash
 wc -c <pack>/tokenizer/chat_template.jinja
-#   v3 合并模板 249545 | v2 248855 | v1 246686 | froggeric 28234 | 原装 226745
+#   生产 v5.9：28234（froggeric v22.5） | unsloth 原装：9004
+#   复现 v5.8 才用：v3 合并模板 249545 | v2 248855 | v1 246686 | DavidAU 原装 226745
 curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["chat_template"]))'
-#   v3 243742 | v2 243052 | v1 241214
+#   生产 v5.9：28226 | v5.8：243742
 ```
 
 恢复：
 
 ```bash
-cp qwen4090-repo/patches/08_qwen38_froggeric_v225_with_dau_modes.jinja \
-   strata-data/packs/<模型>/tokenizer/chat_template.jinja
-# 然后重启（约 40 秒就绪）
+cp qwen4090-repo/patches/froggeric_v22.5.jinja \
+   strata/Strata-data/packs/unsloth-ud-q4kxl-ablit/tokenizer/chat_template.jinja
+# 然后重启（热启约 53 秒）
 ```
 
 ---
 
-## 🔴 50. 怎么判断"自动选模式"到底有没有生效
+## 🔴 50. 自动选模式（仅 v5.3–v5.8，已退役）
 
-症状通常不是报错，而是"感觉怪"：该用 coder 的时候答得很泛，或者随便聊两句突然被套上豪斯医生的人格。
-
-判据按顺序：
-
-```bash
-# 1. 模板对不对（不是原装、不是 froggeric）
-wc -c <pack>/tokenizer/chat_template.jinja          # 249545 = v3
-curl -s 127.0.0.1:8000/props | grep -c 'dau-modes-v3'   # 1
-
-# 2. 规则对不对（离线，渲染真实模板，不碰 GPU）
-python3 qwen4090-repo/patches/08_auto_check.py --set dev+val
-#   期望 dev 95.9% / val 90.0% / 错选 0
-
-# 3. 线上单条
-python3 qwen4090-repo/patches/08_auto_check.py --case "讲个笑话"
-#   输出 mode : comedy，scores 里 comedy 2、其余 0
-
-# 4. 线上真实请求（prompt_tokens 是硬证据）
-curl -s 127.0.0.1:8000/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"Qwen3.8-Flash-Next","messages":[{"role":"user","content":"讲个笑话"}],"max_tokens":1}' \
-  | python3 -c 'import sys,json;print(json.load(sys.stdin)["usage"]["prompt_tokens"])'
-#   约 2847 = comedy 正文进去了；11 = 完全没选模式
-```
-
-常见误判：
-
-| 现象 | 真相 |
-|---|---|
-| 问技术问题没进 coder | 可能是**故意的弃权**（`top1≥2` 且领先第二名才算命中）。看 `--case` 的 scores，别猜 |
-| 一句话被套上 persona | 词表里某个强信号词误伤（如 `代码` 出现在闲聊里）。给 `--explain` 看是哪个词，再决定删/降权 |
-| 换了词表却没变化 | 忘了重新生成模板或没重启；`/props` 里的版本串能分辨 |
-| 同一会话里风格突然变 | 自动判定看**整段对话**，中途继续追加内容会累计分数；换模式请新开会话或敲 `{REASON:xxx}` |
+v5.9 换成官方 UD-Q4_K_XL 后，模板是纯 froggeric v22.5，**没有模式正文、也没有自动选模式**；
+`patches/08_qwen38_froggeric_v225_with_dau_modes.jinja` 与 `patches/08_auto_check.py` 只用于复现旧版本。
+当时的判据（模板 249545、`dau-modes-v3`、`prompt_tokens ≈2847`）不要拿来判当前生产。
+模板校验见 [OPERATIONS.md](OPERATIONS.md) §1a，历史口径见 [HISTORY.md](HISTORY.md)。
 
 ---
 

@@ -6,7 +6,8 @@
 
 | 版本 | 时间 | 引擎 / 权重 | 一句话结果 | 状态 |
 |---|---|---|---|---|
-| **v5.8** | 2026-11-08 | **Strata 0.2.12 + engine 0.1.58** / DavidAU IQ3_S（3.5 bpw） | 当前生产；**速度持平**（6.25K prompt 5,177 t/s、12.7K 5,526 t/s、4 并发 215 t/s），换的是 7 条工具调用修复（`#4828` 强制 tool_choice 0/24→24/24）+ 引擎 `#5108` 长 CUDA prompt 行表越界；W16 cache 仍 **0 MiB**；停机 48 s，验收 24/24，见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md) | ✅ 当前 |
+| **v5.9** | 2026-11-08 | **Strata 0.2.12 + engine 0.1.58** / **unsloth UD-Q4_K_XL（4-bit）+ huihui-ai v2 消融** | 换模型：WorkBuddy 原失败题 0.1666→**0.8917**、0.0→**0.6923**；速度降（4 并发 215→186 t/s，单流 158–164→133–135 t/s）；96/96 张量消融、pack v4、froggeric v22.5（28,226 字符）、验收 29/29，见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md) | ✅ 当前 |
+| v5.8 | 2026-11-08 | **Strata 0.2.12 + engine 0.1.58** / DavidAU IQ3_S（3.5 bpw） | **速度持平**（6.25K prompt 5,177 t/s、12.7K 5,526 t/s、4 并发 215 t/s），换的是 7 条工具调用修复（`#4828` 强制 tool_choice 0/24→24/24）+ 引擎 `#5108` 长 CUDA prompt 行表越界；W16 cache 仍 **0 MiB**；停机 48 s，验收 24/24，见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md) | 被 v5.9 取代 |
 | v5.7 | 2026-11-06 | Strata 0.2.11 + engine 0.1.57 / DavidAU IQ3_S | **FP16 weight cache 在 48 GB 上未启用（0 MiB，需留 3 GiB 空闲）**，换的是 4 条修复（#2518 slot 串台、#5040/#4701 流式工具尾段、#4451 重启后旧请求挂新 slot、#4271 断流不再占 slot）；停机 47 s，验收 24/24，见 [STRATA-UPSTREAM-2026-11-06.md](STRATA-UPSTREAM-2026-11-06.md) | 被 v5.8 取代 |
 | v5.6 | 2026-11-03 | Strata 0.2.10 + engine 0.1.56 / DavidAU IQ3_S | 性能零收益、纯修复（DFlash2 与 4 并发互斥）；停机 47 s，验收 23/23，见 [STRATA-UPSTREAM-2026-11-03.md](STRATA-UPSTREAM-2026-11-03.md) | 被 v5.7 取代 |
 | v5.5 | 2026-11-01 | Strata 0.2.9 + engine 0.1.55 / DavidAU IQ3_S | 第一个"默认开性能开关"的版本（并行栈 9 项 + GDN 张量核）；停机 47 s，验收 21/21 | 被 v5.6 取代 |
@@ -20,7 +21,7 @@
 | v2 | 2026-09-14 | Lsglang 0.5.19-lkmoe + PR #37500 | 首次在单 4090 上跑通 Flash-Next | ⛔ 运行时已删 |
 | v1 | — | Lsglang 1.4.13 + lk_moe 2.4.0 | 早期能起服务，长上下文不可用 | ⛔ 运行时已删 |
 
-## 为什么从 v5.3 一路走到 v5.8
+## 为什么从 v5.3 一路走到 v5.9
 
 - **v5.4（0.2.7）**：0.2.3–0.2.6 对 Qwen 单卡无增量（0.2.6 的 Qwen 引擎与 0.2.5 逐字节相同）；0.2.7 是 0.2.2 之后第一个动 sm_89 的版本
   （实测速度表，结果 bit-for-bit 不变）+ `#1503` 会话缓存跨会话、`#3602` 读表挂死等修复。见 [STRATA-UPSTREAM-2026-10-28.md](STRATA-UPSTREAM-2026-10-28.md)。
@@ -38,12 +39,18 @@
   拿到的是 7 条工具调用修复（`#4828` 多个工具 + 强制 `tool_choice` 从 0/24 修到 24/24 最关键，另有 `#5312`/`#5409`/`#5276`/`#4832`/`#4622`）
   与引擎 `#5108`（行表越界读取会 fault 长 CUDA prompt）、`#5096/#4844`（copy 顺序、丢失的 adaptive swap）。
   同协议实测 6.25K prompt 5,177 t/s、12.7K 5,526 t/s、4 并发 215 t/s，与 0.1.57 差在 ±1% 噪声内；停机 48 s。见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md)。
+- **v5.9（换模型）**：引擎不动，权重从 DavidAU IQ3_S（83.86 GB，3.4 bpw）换成官方 unsloth v3.1 **UD-Q4_K_XL**（111.33 GB），
+  再用 huihui-ai v2 的 `patch-all` 消融 96 个 `ssm_out` / `attn_output` / `ffn_down_shexp` 张量（不动 routed experts），pack 用 `iq_pack.py` 现建 v4，
+  模板换回 froggeric v22.5。质量明显上行，代价是 33% 的权重体积：4 并发 215→186 t/s、单流 158–164→133–135 t/s。见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)。
 - **遗留**：`#3952`（sm_89 + 262144 ctx + `--spec 4` 的 VRAM 崩塌报告）仍 open；我们靠 `--vram-reserve-mib 2560` + `--kv-resident 32768` 维持 ~2,480 MiB 余量。
-  `PLE table mlock failed` 仍在（systemd 单元 `LimitMEMLOCK` 只有 8 MiB；属于 PINNED 路径之外的锦上添花，不影响服务）。
+  `PLE table mlock failed` 仍在：`LimitMEMLOCK` 只有 8 MiB，且 `user@1000.service` 自身硬上限就是 8 MiB，transient 单元抬不上去；要锁 PLE 表得 root 加 `user@.service.d/` drop-in（上游称最多 +6% decode）。
 - **没做严格的交错 A/B**：每代引擎各需一次重启，生产中断代价大于 5% 量级的收益；现有数字只能说明"没有可见回退"。
 
 ## 已删除的东西
 
 - FreeToken / Lsglang / 官方 sglang 的 venv、启动脚本、权重与补丁（2026-10-18 清理）；旧补丁在
   [`archive/patches/`](../archive/patches/)，旧脚本在 [`archive/scripts/`](../archive/scripts/)。
-- UD-Q4_K_XL（111.33 GB）与 NVFP4（126 GiB）权重已删；回滚要重下。
+- v5.1 的旧 3 片版 UD-Q4_K_XL（111.33 GB，49.86/49.38/12.09 GB 切分）与 NVFP4（126 GiB）权重已删；
+  现行 v5.9 用的是 2026-11-04 重切的 v3.1 四片版（总量同为 111.33 GB，边界不同），两者不是同一批文件。
+- **2026-11-08 第二轮删除（用户要求，物理删除、无归档）**：DavidAU IQ3_S（79 GB）及其 pack/旧 mmproj、vLLM 源码 + conda env + `~/.cache/vllm`、
+  `LLM_MODEL` 里的 NVFP4 / FP8 权重、Strata 0.2.2–0.2.11 旧树与旧 config/启动脚本全部删掉，共腾出 289 GB。现在只剩 0.2.12 + UD-Q4_K_XL 一条路线。

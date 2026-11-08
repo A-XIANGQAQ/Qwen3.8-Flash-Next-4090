@@ -1,4 +1,24 @@
-# 基准实测（v5.3，2026-10-25）
+# 基准实测（当前 v5.9；附 v5.3 口径）
+
+## 0. 换模型后的实测（v5.9，2026-11-08）
+
+同机同协议（`scripts/prefill_bench.py` 与 `strata/concurrent.py`），对照 v5.8 的 IQ3_S：
+
+| 项 | IQ3_S（0.1.58） | UD-Q4_K_XL（0.1.58） |
+|---|---:|---:|
+| prefill 6,288 tok | 5,177 t/s | 2,752 t/s |
+| prefill 12,839 tok | 5,526 t/s | 4,479 t/s |
+| 4 并发聚合（3 轮） | 207.9 / 214.8 / 214.8 t/s | 186.2 / 184.2 / 188.4 t/s |
+| 每路 decode 中位 | 50.7 / 57.1 / 57.9 t/s | 48.5 / 48.9 / 49.6 t/s |
+| 单流 decode | ~158–164 t/s | 112.8（default）/ 133.1–134.7（low） |
+| TTFT（4 并发） | 0.643 / 0.387 / 0.383 s | 0.44 / 0.61 / 0.53 s |
+
+权重 +33%（83.86 → 111.33 GB）、专家槽 17,283 → 10,902；单流下滑与体积同量级，4 并发只掉 13%。
+方法、pack、模板与质量抽查见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)。
+
+# 附：v5.3 口径（2026-10-25，IQ3_S + 0.1.47，vLLM 基准）
+
+以下 §1–§9 全部属于这一口径，不代表 v5.9 的当前数字。
 
 > **一句话**：单流 decode **167–177 t/s**（1K→256K 基本平坦），单流 prefill **约 3.9–4.05K t/s**
 > （8K 以上；1K 档 TTFT 0.82 s 里固定开销占大头），**260K 首次实测**：TTFT 66.2 s、decode 168 t/s。
@@ -14,8 +34,8 @@
 | 项 | 值 |
 |---|---|
 | 主机 | 单 RTX 4090 **48GB**（sm_89），38 核 / 76 线程，247GB RAM |
-| 引擎 | Strata **0.2.2** 服务端 + **engine 0.1.47**（2026-10-25 当时版本；v5.8 已升 0.2.12/0.1.58） |
-| 模型 | DavidAU Qwen3.8-Flash-Next abliterated **IQ3_S**（83.86GB，2 shards，3.5 bpw） |
+| 引擎 | Strata **0.2.2** 服务端 + **engine 0.1.47**（2026-10-25 当时版本；当前 v5.9 = 0.2.12 + 0.1.58 + UD-Q4_K_XL） |
+| 模型 | DavidAU Qwen3.8-Flash-Next abliterated **IQ3_S**（83.86GB，2 shards，3.5 bpw；v5.3 口径） |
 | 服务地址 | `127.0.0.1:8000`，`/v1/chat/completions` |
 | 并发 / 上下文 | `--batch 4`，`--max-context 262144` |
 | KV | `--kv k8v4 --kv-resident 32768` |
@@ -25,7 +45,7 @@
 | 启动后空闲显存 | 2,231 MiB |
 | 测量窗口 | 2026-10-25 13:31–13:39（服务未重启、未停服），`live.state` 全程 idle，`engine_cache_reused_ratio = 0` |
 
-配置原文（args 逐字）见生产 config `strata-davidau-iq3_s-0212.json`；`--batch 4` 由 serve 层补齐。
+配置原文（v5.3 的 args 逐字）已随旧模型删除；当前生产配置见 `strata/strata-unsloth-q4kxl-ablit.json`（同样 30 项，`--batch 4` 由 serve 层补齐）。
 
 ## 2. 方法
 

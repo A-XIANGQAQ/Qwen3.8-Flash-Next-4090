@@ -1,17 +1,32 @@
 # Qwen3.8-Flash-Next on a single RTX 4090 48GB
 
-一份面向**单卡 RTX 4090（SM89，48GB）**的 Qwen3.8-Flash-Next 部署与实测记录：让 83.86GB 的 MoE 权重
+一份面向**单卡 RTX 4090（SM89，48GB）**的 Qwen3.8-Flash-Next 部署与实测记录：让 111.33GB 的 MoE 权重
 （6B active）跑在一张消费级卡上——**权重驻内存、CPU 算 experts、GPU 算 attention/PLE/常驻层**。
 
-**当前组合 v5.8 = Strata 0.2.12（服务端）+ engine 0.1.58（预编译）+ DavidAU abliterated IQ3_S（3.5 bpw）+ 合并模板 v3。**
-2026-10-25 用 **vLLM 官方 benchmark** 重测了 prefill / decode / 并发，原始数据在
+**当前组合 v5.9 = Strata 0.2.12（服务端）+ engine 0.1.58（预编译）+ unsloth UD-Q4_K_XL（4-bit，huihui v2 破限）+ froggeric v22.5 模板。**
+v5.3 时期（2026-10-25）用 **vLLM 官方 benchmark** 重测了 prefill / decode / 并发，原始数据在
 [`bench/results/2026-10-25/`](bench/results/2026-10-25/)。
 
 > [!WARNING]
-> 社区实验复现，非官方支持方案。不要表述为「SM89 已获上游官方支持」。Strata 走投机解码，
-> 输出与 v4（FreeToken）**非逐位一致**；本仓库只报告实测速度与拒答率，不宣称「质量等价」。
+> 社区实验复现，非官方支持方案：Strata 官方口径没有 sm_89。所有数字是本机实测，不是厂商承诺。
 
-## 最新实测（2026-10-25）
+## 换模型后的实测（v5.9，2026-11-08）
+
+全部改用 unsloth **UD-Q4_K_XL**（111.33 GB）后，同机同协议：
+
+| 项 | IQ3_S（v5.8） | UD-Q4_K_XL（v5.9） |
+|---|---:|---:|
+| prefill 6.2K | 5,177 t/s | 2,752 t/s |
+| prefill 12.8K | 5,526 t/s | 4,479 t/s |
+| 4 并发聚合 | 207.9 / 214.8 / 214.8 t/s | **186.2 / 184.2 / 188.4 t/s** |
+| 单流 decode | 158–164 t/s | 112.8（default）/ **133–135**（low） |
+| 破限探针 | 8/8 不拒答 | **8/8 不拒答** |
+
+模型大 33%，专家槽 17,283 → 10,902；单流下滑基本等于多搬的专家字节，4 并发只掉 13%。
+质量侧：WorkBuddy 两道原失败题 0.1666→**0.8917**、0.0→**0.6923**。细节见
+[STRATA-MODEL-2026-11-08.md](docs/STRATA-MODEL-2026-11-08.md)。
+
+## 基准实测（v5.3，2026-10-25，vLLM 口径）
 
 工具：[vLLM `v0.7.3` 的 `benchmark_serving.py`](https://github.com/vllm-project/vllm)（vendored + 5 处 Strata 适配，
 逐条见 [`bench/vllm_0.7.3/PATCHES.md`](bench/vllm_0.7.3/PATCHES.md)）。服务未重启，独占窗口，全部新 prompt
@@ -56,21 +71,20 @@
 | [Niko1221/Strata](https://github.com/Niko1221/Strata) | 上游只发 Windows 二进制 | 需 Linux 自建/调参（本文即这份记录） |
 | **本项目** | **单 4090 48GB** | ✅ |
 
-## 当前组合（v5.3，2026-10-22 起）
+## 当前组合（v5.9，2026-11-08 起）
 
 | 层 | 固定身份 |
 |---|---|
-| 模型 | `DavidAU/Qwen3.8-Flash-Next-Abliterated-…-GSQ-RCO-GGUF` → **IQ3_S**（83.86 GB / 2 shards，3.5 bpw，自带 abliteration） |
+| 模型 | `unsloth/Qwen3.8-Flash-Next-GGUF` → **UD-Q4_K_XL**（111.33 GB / 4 shards，4-bit；huihui-ai v2 消融 96 张量） |
 | 引擎 | [Niko1221/Strata](https://github.com/Niko1221/Strata) **0.2.12 服务端 + 0.1.58 预编译引擎**（CUDA 13，arch 含 sm_89，sha256 与签名 feed 一致 `bbbfa826…09d54`） |
 | 并发 / 上下文 | `--batch 4` × `--max-context 262144`（每 slot 独立 session） |
 | KV | **`k8v4` + `--kv-resident 32768`**（816 B/cell；KV 流式到宿主内存，4×256K 全放显存会 OOM） |
-| 破限 | **模型自带**（强探针 0/14、温和 0/22 拒答）；不需要 ESP 控制向量 |
-| 图像 | 自带 vision 编码器（`mmproj-…-BF16.gguf` 0.91 GB，GPU 模式）；`--vram-reserve-mib 2560` |
-| Chat 模板 | **合并模板 249,545 B**：froggeric v22.5 + 29 段模式正文 + 8 个 xhigh 组合键 + 自动选模式 v3，**服务端代码一行没改** |
-| 模式选择 | 自动（分数 ≥2 且领先第二名才选）+ `{REASON:xxx}` 手动覆盖 |
-| GPU | 单 RTX 4090 **48GB** / sm89 / TP1；引擎报告 33,603 MiB 专家缓存 / 17,283 槽（空闲 2,483 MiB） |
+| 破限 | **huihui-ai v2 消融补丁**（`ssm_out` / `attn_output` / `ffn_down_shexp`，96/96 命中，不动 routed experts）；强探针 8/8 不拒答 |
+| 图像 | 自带 vision 编码器（`mmproj-BF16.gguf` 0.91 GB，GPU 模式）；`--vram-reserve-mib 2560` |
+| Chat 模板 | **froggeric v22.5**（28,234 B / 28,226 字符）：`reasoning_effort` 全档位（off/low/medium/high/xhigh）+ `{REASON:xxx}` 手动覆盖 + 工具调用修复，**服务端代码一行没改**；DavidAU 的 29 段模式系统随旧模型退役 |
+| GPU | 单 RTX 4090 **48GB** / sm89 / TP1；引擎报告 32,595 MiB 专家缓存 / 10,902 槽（空闲 2,517 MiB） |
 
-## 快速开始（v5.8）
+## 快速开始（v5.9）
 
 完整从零步骤（模型下载、pack、PLE 分片、模板、成功判据）见 [docs/REPRODUCTION.md](docs/REPRODUCTION.md)。
 最短路径（已有模型/pack 时）：
@@ -80,6 +94,7 @@ export https_proxy=http://127.0.0.1:7890
 
 # 1. 服务端源码 + 官方预编译引擎（0.2.12 / 0.1.58）
 mkdir -p strata/Strata-0.2.12
+# 源码 tarball 偶发截断；若 gzip 报 unexpected end of file，改用 GitHub tree API 逐文件取（见 docs/UPSTREAM 文档）
 curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.12.tar.gz \
   | tar -xz -C strata/Strata-0.2.12 --strip-components=1
 gh release download v0.2.12 --repo Niko1221/Strata \
@@ -88,15 +103,15 @@ mkdir -p strata/Strata-0.2.12/engine
 tar -xzf /tmp/strata-engine-0.1.58-linux-x86_64-cuda-cuda13.tar.gz -C strata/Strata-0.2.12/engine
 # sha256 期望 bbbfa8260125b94591cae30747cb0e4a9cee26d9cb0b2e284e33000c91509d54
 
-# 2. 合并模板（249545 B）
-cp patches/08_qwen38_froggeric_v225_with_dau_modes.jinja \
+# 2. 模板（froggeric v22.5，28234 B / 28226 字符）
+cp patches/froggeric_v22.5.jinja \
    <Strata-data>/packs/<pack>/tokenizer/chat_template.jinja
 
-# 3. 启动（必须在你自己的终端里跑；就绪约 40 秒）
+# 3. 启动（必须在你自己的终端里跑；冷启约 106 秒、热启约 53 秒）
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 ```
 
-⚠️ **不要跑 `./setup.sh` / `update.sh`**：会重导原装模板（226,745 B）、重写 config（丢手调参数），
+⚠️ **不要跑 `./setup.sh` / `update.sh`**：会重导原装模板（9,004 B）、重写 config（丢手调参数），
 0.1.44+ 还可能因 #2902 删模型分片。升级只换「服务端源码 + 引擎目录」。
 ⚠️ 服务端 / 引擎 / vision 必须同代（0.2.12 ↔ 0.1.58）；从 agent 的 bash 工具里起进程会被 systemd cgroup 连坐。
 
@@ -110,7 +125,8 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 - **0.2.11 引入的 FP16 weight cache 仍未启用**（`FP16 weight cache 0 MiB`：要分配后仍留 3,072 MiB 空闲，本机只剩 ~2,900 MiB），所以拿不到上游 4 路 +5.7%。
 - **0.2.12 速度持平、换的是工具调用与健壮性**：`#4828` 多工具 + 强制 `tool_choice` 从 0/24 修到 24/24，另有 `#5312`、`#5409`、`#5276`、`#4832`、`#4622`；引擎 `#5108` 长 CUDA prompt 行表越界 fault、`#5096/#4844` copy 顺序。头部 tuned DFlash2 不适用——它要求「专家全部驻留显卡」，我们 4 slots + 流式专家 ⇒ MTP，不会下载 drafter。
 - 实测（同协议前后）：6.25K prompt **5,177 t/s**、12.7K prompt **5,526 t/s**、4 并发聚合 **215 t/s**，与 0.1.57 差在 ±1% 噪声内；停机 48 s、模板 243,742 chars 不变、`build_info "Strata 0.1.58"`、验收 24/24、`drafting = mtp`。
-- 回滚：`run_strata_0211.sh`（0.2.11 + 0.1.57）、`run_strata_0210.sh`（0.2.10 + 0.1.56）、`run_strata_029.sh`（0.2.9 + 0.1.55）、`run_strata_027.sh`（0.2.7 + 0.1.52）都保留；只关 0.2.9 的新默认值可用 `STRATA_CKPT_POOL=0` / `STRATA_GDN_TC=0`。
+- **v5.9 换的是模型，不是引擎**：0.2.12 + 0.1.58 不动，权重换 unsloth UD-Q4_K_XL + huihui v2 消融 + froggeric v22.5；质量升、速度降，见 [STRATA-MODEL-2026-11-08.md](docs/STRATA-MODEL-2026-11-08.md)。
+- 回滚：IQ3_S 模型、pack 与 0.2.2–0.2.11 旧树**已物理删除**，回滚要重下 84 GB + 重建 pack；生产现在只有 `run_strata_q4kxl.sh` 一套。
 
 ## 边界与未验证
 
@@ -126,7 +142,8 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 
 | 版本 | 运行时 / 权重 | 一句话 |
 |---|---|---|
-| **v5.8（当前）** | Strata 0.2.12 + 0.1.58 / DavidAU IQ3_S | 速度持平；换 7 条工具调用修复（`#4828` 0/24→24/24）+ `#5108` 长 prompt fault；停机 48 s、验收 24/24 |
+| **v5.9（当前）** | Strata 0.2.12 + 0.1.58 / **unsloth UD-Q4_K_XL + huihui v2 破限** | 换模型：质量升（WorkBuddy 0.17→0.89、0→0.69），速度降（4 并发 215→186 t/s）；froggeric v22.5、验收 29/29 |
+| v5.8 | Strata 0.2.12 + 0.1.58 / DavidAU IQ3_S | 速度持平；7 条工具调用修复（`#4828` 0/24→24/24）+ `#5108`；停机 48 s、验收 24/24 |
 | v5.7 | Strata 0.2.11 + 0.1.57 / DavidAU IQ3_S | W16 cache 在 48 GB 上未启用（0 MiB）；换 4 条 slot/工具流修复；停机 47 s、验收 24/24 |
 | v5.3 | Strata 0.2.2 + 0.1.47 / DavidAU IQ3_S | 2026-10-25 vLLM 基准：decode 167–177 t/s、prefill ~3.9–4.05K t/s、256K 首测 |
 | v5.2 | Strata 0.1.45 / DavidAU IQ3_S | 换模型：decode +10%、拒答 4.55%→0% |
@@ -148,6 +165,7 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 | [TEMPLATE.md](docs/TEMPLATE.md) | 合并模板：规则、词表、评测集、怎么改 |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 症状 → 判据 → 修复（现行 29–50 + 通用项） |
 | [HISTORY.md](docs/HISTORY.md) | 压缩版版本表与已删除项 |
+| [STRATA-MODEL-2026-11-08.md](docs/STRATA-MODEL-2026-11-08.md) | 换模型：UD-Q4_K_XL + huihui v2 消融、pack v4、froggeric v22.5、速度/质量实测 |
 | [STRATA-UPSTREAM-2026-11-08.md](docs/STRATA-UPSTREAM-2026-11-08.md) | 0.2.12 升级评估：速度持平、工具调用 7 条修复、官方 FP8 模板 commit 是 no-op |
 | [STRATA-UPSTREAM-2026-11-06.md](docs/STRATA-UPSTREAM-2026-11-06.md) | 0.2.11 升级评估：W16 cache 为何在本机 0 MiB、4 条命中修复 |
 | [STRATA-UPSTREAM-2026-10-25.md](docs/STRATA-UPSTREAM-2026-10-25.md) | 0.2.3/0.2.4 升级评估与阈值 |
@@ -157,7 +175,7 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 - **[Niko1221/Strata](https://github.com/Niko1221/Strata)**（当前引擎）：自有 C++/CUDA 引擎，复用 llama.cpp 的
   ggml/gguf-py/mtmd；自带 MoE 专家分层、conversation cache、MTP 投机解码。
 - **[froggeric/Qwen-Fixed-Chat-Templates](https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates)**：
-  修复版 Jinja 模板；本项目以 v22.5 为底合并模型自带模式系统。
+  修复版 Jinja 模板；v5.3–v5.8 曾以 v22.5 为底合并 DavidAU 的模式系统，v5.9 起回到纯 v22.5。
 - **[vllm-project/vllm](https://github.com/vllm-project/vllm)**：本仓库的基准脚本来源（v0.7.3，vendored，
   Apache-2.0，5 处适配见 [PATCHES](bench/vllm_0.7.3/PATCHES.md)）。
 

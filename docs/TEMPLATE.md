@@ -1,5 +1,8 @@
 # 合并模板（patch 08）：模式自动选择 v3
 
+> **v5.9 起生产不再使用本页的合并模板**：模型换成官方 unsloth UD-Q4_K_XL 后，模板改为纯 froggeric v22.5。
+> 本页保留，仅用于复现 v5.3–v5.8（`patches/08_*` 与 `patches/08_qwen38_froggeric_v225_with_dau_modes.jinja`）。
+
 一份 `chat_template.jinja` 同时干两件事：保持 froggeric v22.5 的渲染修复（effort 别名、think 标记、工具调用、
 截断、连续失败告警），并把模型自带的 29 段模式正文和 8 个 xhigh 组合键接进来、由模板自己挑模式。
 **服务端代码一行没改。**

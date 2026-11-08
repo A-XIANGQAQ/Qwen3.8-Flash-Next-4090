@@ -1,12 +1,12 @@
-# 路线：Strata（v5.8）
+# 路线：Strata（v5.9）
 
 把生产引擎从 v4（FreeToken + 3 个本地补丁）换成 [Niko1221/Strata](https://github.com/Niko1221/Strata)：
 一个自带 C++/CUDA 引擎，复用 llama.cpp 的 ggml/gguf-py/mtmd，做 MoE 专家分层（VRAM/RAM/SSD）、
 conversation cache、KV 流式与 MTP 投机解码。
 
-**当前固定身份**：Strata **0.2.12** 服务端 + **engine 0.1.58**（预编译，arch 含 sm_89）+ DavidAU IQ3_S。
-版本演进见 [HISTORY.md](HISTORY.md)，实测见 [BENCHMARK.md](BENCHMARK.md)，升级判断见
-[STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md)。
+**当前固定身份**：Strata **0.2.12** 服务端 + **engine 0.1.58**（预编译，arch 含 sm_89）+ unsloth **UD-Q4_K_XL**（huihui v2 消融）。
+版本演进见 [HISTORY.md](HISTORY.md)，实测见 [BENCHMARK.md](BENCHMARK.md)，换模型见
+[STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)，升级判断见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md)。
 
 ## 1. 为什么是它
 
@@ -19,30 +19,32 @@ conversation cache、KV 流式与 MTP 投机解码。
 | 4 路聚合 / 每路 | 117.1 / 45.8 | 137 / 36.9 |
 | 并发扩展比 1→4 | 2.55× | 1.16× |
 
-结论：**1–2 路交互全面占优；高并发扩展性弱**。v5.3 的当前实测（vLLM 口径）见 [BENCHMARK.md](BENCHMARK.md)：
-单流 decode 约 160–175 t/s、32K prefill 约 3.9K t/s、260K prefill 约 66 s。
+结论：**1–2 路交互全面占优；高并发扩展性弱**。v5.3 历史实测（vLLM 口径，IQ3_S）见 [BENCHMARK.md](BENCHMARK.md)：
+单流 decode 约 160–175 t/s、32K prefill 约 3.9K t/s、260K prefill 约 66 s；v5.9 换 UD-Q4_K_XL 后的当前数字在同页 §0。
 没有"影子部署"：两块引擎都吃满 48GB，只能停机切换；本仓库现在只保留 Strata。
 
-## 2. 模型：DavidAU abliterated IQ3_S
+## 2. 模型：unsloth UD-Q4_K_XL（huihui v2 消融）
 
-`DavidAU/Qwen3.8-Flash-Next-Abliterated-Uncensored-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF`
+`unsloth/Qwen3.8-Flash-Next-GGUF` → `UD-Q4_K_XL/`（v3.1 Dynamic，2026-11-04），再用 huihui-ai v2 的
+`patch-all` 做 96 张量消融。
 
 | 项 | 值 |
 |---|---|
-| 量化 | **IQ3_S**，3.5 bpw，**83.86 GB / 2 shards** |
-| 破限 | **模型自带 abliteration**，不需要 ESP 控制向量（v5.1 的 UD-Q4_K_XL 才需要） |
-| 模板 | 自带 22 万字符模板，被合并模板替代（见 [TEMPLATE.md](TEMPLATE.md)） |
-| 视觉 | `mmproj-Qwen3.8-Flash-Next-BF16.gguf`（907,543,008 B）+ `engine/strata-vision` |
-| PLE 表 | `per_layer_token_embd.weight` 留在 GGUF 里，由 `--ple-gguf` 指向含它的分片；**不一定在 shard1** |
+| 量化 | **UD-Q4_K_XL**（4-bit，约 4.3 bpw 有效精度），**111.33 GB / 4 shards** |
+| 破限 | **huihui v2 消融**：`ssm_out` / `attn_output` / `ffn_down_shexp` 共 96 张量，**不动 routed experts**；不需要 ESP 控制向量 |
+| 模板 | **froggeric v22.5**（28,234 B / 28,226 字符），见 §9 |
+| 视觉 | `mmproj-Qwen3.8-Flash-Next-BF16-unsloth.gguf`（907,542,944 B）+ `engine/strata-vision` |
+| PLE 表 | `per_layer_token_embd.weight` 是 **shard4**（IQ4_NL，28.8 GB），由 `--ple-gguf` 指向它 |
 
-下载与 pack 生成见 [REPRODUCTION.md §4–5](REPRODUCTION.md)。
+下载、打补丁与 pack 生成见 [REPRODUCTION.md §4–5](REPRODUCTION.md)，换模型全过程见
+[STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)。
 
 ## 3. 获取与版本配对
 
 0.2.0 起上游发 **Linux 预编译引擎**（0.1.58 的 `BUILD.json`: `archs [75,86,89,120]`, CUDA 13.0），
 不再需要自建；但**不跑 `setup.sh`**：
 
-- setup 会从 GGUF 重导原装模板（226,745 B）→ 覆盖合并模板
+- setup 会从 GGUF 重导 unsloth 原装模板（9,004 B）→ 覆盖 froggeric
 - `carry_over()` 会重写 run config，**手工加进 `args` 的 12 个参数不会合并**
 - 0.1.44+ 的分片 SHA 校验有 #2902（大分片误判并删文件）
 
@@ -61,10 +63,12 @@ conversation cache、KV 流式与 MTP 投机解码。
 --mtp <Strata-data>/mtp/rt
 --conversation-cache-mib 8192
 --prefill auto:32768         # 实测比 auto（8192）快约 20%
---resident-budget-gib 56
 --vision --vram-reserve-mib 2560
---expert-cache auto          # 落点：~32.3 GiB / ~11K 槽
+--expert-cache auto          # 落点：~32.6 GiB / 10,902 槽
 ```
+
+共 **30 项**，不含 `--resident-budget-gib`：247 GB 内存足够把 72 GiB 专家全部驻留 RAM（arena 73,450 MiB），
+预算模式反而慢（上游实测 118 vs 169 t/s）。config 的 `env` 里设 `STRATA_ROUTE_TAIL_SKIP=0`。
 
 ## 5. KV：`k8v4` + 必须流式
 
@@ -111,34 +115,34 @@ conversation cache、KV 流式与 MTP 投机解码。
 
 ## 9. 模板
 
-生产装的是**合并模板 v3**（249,545 B）：froggeric v22.5 + 模型自带 29 段模式正文 + 8 个 xhigh 组合键 +
-自动选模式 v3。`setup.sh` 每次会覆盖它；不要挂"模板守卫"（会写成纯 froggeric 28,234 B）。
-详见 [TEMPLATE.md](TEMPLATE.md)。
+生产装的是 **froggeric v22.5 原版**（28,234 B / 28,226 字符）：effort 别名、think 标记、工具调用与截断修复，
+`reasoning_effort` 由请求头控制。`setup.sh` 每次会把 unsloth 原装模板（9,004 B）写回去；改完模板要重启。
+DavidAU 的 29 段模式合并模板（249,545 B）只用于复现 v5.3–v5.8，见 [TEMPLATE.md](TEMPLATE.md)。
 
 ## 10. 运维与健康判据
 
 启动/停止/升级：[OPERATIONS.md](OPERATIONS.md)。三层判据缺一不可：
 
 1. 进程：`pgrep -x strata` + `:8000` 在听
-2. 版本/模板：`/props.build_info == "Strata 0.1.58"`，`chat_template` 长度 **243742**
+2. 版本/模板：`/props.build_info == "Strata 0.1.58"`，`chat_template` 长度 **28226**
 3. 端到端：一条中文请求正文可读；`/metrics` 的 `live.state` 回到 `idle`
 
-破限判据：当前模型**不该**出现 ESP 控制向量行（那是 UD-Q4_K_XL 路线）。
+破限判据：来自 huihui v2 消融（96 张量），**不该**出现 ESP 控制向量行；8 条强探针 8/8 不拒答。
 
 ## 11. 已验证 / 未验证
 
-**已在 v5.8（0.2.12 + 0.1.58）上验证**：
+**已在 v5.9（0.2.12 + 0.1.58 + UD-Q4_K_XL）上验证**：
 
 - 1K / 8K / 32K / 64K / 128K / 260K prefill 与 1K / 32K / 128K / 260K decode，2–4 路并发
   （2026-10-25，vLLM 口径，见 [BENCHMARK.md](BENCHMARK.md)）
 - 4×256K 配置与 KV 流式；`k8v4`；`--batch-mtp` 并发
-- 视觉三色条 3/3（0.1.45 时代，样本小）；专家缓存 **33,603 MiB / 17,283 槽**（0.1.58）；启动后空闲显存 2,483 MiB
-- **0.2.9 的 11 个新默认环境变量逐个在引擎进程里确认生效**（9 并行 + 2 GDN），并在 0.2.12 上复验仍是同一组；验收 24/24；`drafting = mtp`（4 并发下自动选 MTP）；6.25K prompt 5,177 t/s、12.7K prompt 5,526 t/s、4 并发聚合 215 t/s（2026-11-08，同协议与 0.1.57 对比）
+- 视觉三色条 3/3（0.1.45 时代，样本小）；专家缓存 **32,595 MiB / 10,902 槽**；arena **73,450 MiB**（专家全驻 RAM）；启动后空闲显存 2,517 MiB
+- **0.2.9 的 11 个新默认环境变量逐个在引擎进程里确认生效**（9 并行 + 2 GDN），0.2.12 上仍是同一组；`drafting = mtp`；**验收 29/29**；换模型后 6.25K prompt 2,752 t/s、12.7K 4,479 t/s、4 并发聚合 186–188 t/s（2026-11-08，同协议对照 IQ3_S）
 - 0.2.11 引入、0.2.12 仍为 **FP16 weight cache 0 MiB**（需分配后留 3,072 MiB 空闲，本机余 ~2,900 MiB），因此上游 4 路 +5.7% 未复现；`pcie_frac` 由 0.55 变为按 CPU 实测的 **0.15**
 - 0.1.43.1 曾连续跑 2 天 23 小时（被 cgroup 连带杀，不是自崩）
 
 **未验证**：
 
 - 多日稳定性、>4 路密集并发的扩展性
-- 质量结论：只有 15 题数学与 0/14 破限探针，不构成质量结论；要上 GSM8K 之类
-- 0.1.48 / 0.2.3+（当前不升级，理由见上游评估）
+- 质量结论：WorkBuddy Office 只抽查了 4 题（2 错 2 对），不足以给整体分数；要全量得跑完 50 题
+- 7×24 稳定性（换模型后只跑了当天）

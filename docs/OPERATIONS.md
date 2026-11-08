@@ -1,7 +1,7 @@
 # 运维手册 (Operations)
 
-> 当前只有 **v5.8：Strata 0.2.12 服务端 + engine 0.1.58 + DavidAU IQ3_S**。
-> 引擎细节见 [STRATA.md](STRATA.md)，升级判断见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md)，
+> 当前只有 **v5.9：Strata 0.2.12 服务端 + engine 0.1.58 + unsloth UD-Q4_K_XL（huihui v2 破限）+ froggeric v22.5**。
+> 引擎细节见 [STRATA.md](STRATA.md)，换模型见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)，
 > 模板见 [TEMPLATE.md](TEMPLATE.md)，实测见 [BENCHMARK.md](BENCHMARK.md)。
 
 ## 1. 启动 (Start)
@@ -12,7 +12,7 @@
 #    setsid 只脱离终端/会话、脱不出 cgroup；dsh-web 重启时 server/strata/strata-vision 整组被 SIGTERM。
 #    症状：日志只有 stopping (Ctrl+C again...)，没有 traceback / CUDA / OOM。
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
-# 就绪：日志行 ready:（0.1.58 实测 36 秒：10:49:20 engine started → 10:49:56 /health loaded）
+# 就绪：日志行 ready:（0.1.58 + UD-Q4_K_XL 实测：热启 53 秒、首次冷启 106 秒）
 #   ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions,
 #                                     Anthropic: /v1/messages, context 262144 tokens)
 ```
@@ -28,21 +28,21 @@ systemd-run --user --unit=strata-prod --collect \
 # systemctl --user stop strata-prod
 ```
 
-⚠️ **不要用 `./setup.sh` 起服务**：它会重导原装模板（大小 226745）、重写 config；
-当前模型自带 22 万字符模板，靠启动器保证不被覆盖（见 [TROUBLESHOOTING #45/#49](TROUBLESHOOTING.md)）。
+⚠️ **不要用 `./setup.sh` 起服务**：它会重导 unsloth 原装模板（9,004 字节）、重写 config；
+当前用 froggeric v22.5（28,234 字节），靠启动器保证不被覆盖（见 [TROUBLESHOOTING #49](TROUBLESHOOTING.md)）。
 ⚠️ **起之前显存必须已空**（`nvidia-smi` used <1000 MiB），否则 `cudaMalloc` OOM（[#29](TROUBLESHOOTING.md)）。
 
-## 1a. 模式自动选择（模板内）
+## 1a. 模板校验（froggeric v22.5）
 
-规则/词表/评测全在 [TEMPLATE.md](TEMPLATE.md)。常用：
+历史模式表在 [TEMPLATE.md](TEMPLATE.md)（v5.9 起不再使用）。常用：
 
 ```bash
-python3 patches/08_auto_check.py --set dev+val        # 离线回归（渲染真实模板）
-python3 patches/08_auto_check.py --case "讲个笑话"     # 单条，带分数
-wc -c <pack>/tokenizer/chat_template.jinja            # 249545 = v3
+wc -c <pack>/tokenizer/chat_template.jinja            # 28234（froggeric v22.5）
+curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;d=json.load(sys.stdin);print(len(d["chat_template"]))'   # 28226
 ```
 
-判定：**分数 ≥2 且严格高于第二名才选，否则不选**。线上判据：`讲个笑话` 的 `prompt_tokens` ≈ 2847（选了 comedy）。
+v5.9 起模板是 froggeric v22.5 原版，`reasoning_effort`（off/low/medium/high/xhigh）由请求头控制；
+旧合并模板的自动选择脚本 `patches/08_auto_check.py` 只在复现 v5.8 时用。
 
 ## 1b. 引擎升级（同代最小路径）
 
@@ -75,11 +75,11 @@ bash strata/run_strata.sh           # 指向新树/新 config
 
 1. **server / engine / vision 必须同代**。0.2.12 的 `MIN_ENGINE` 仍是 `(0,1,46)`（只在 setup.py 校验；serve 侧无版本门控），但新引擎特性只在 0.1.58；
    只换一个会静默少功能（[#39](TROUBLESHOOTING.md)）。
-2. **不要跑 setup 主流程**：`carry_over()` 不合并手工 args（32 个手调参数会丢）；#2902 还会删大分片。
+2. **不要跑 setup 主流程**：`carry_over()` 不合并手工 args（30 个手调参数会丢）；#2902 还会删大分片。
 3. **`engine/` 整目录替换**，不能只拷 `strata` + `strata-vision`：0.1.44 起还有 `libstrata_kq.so`。
 
-**回滚**：停服务 → 等显存 <1000 MiB → config 指回旧 `engine/`（或整目录拷回）→ 起服务。
-旧树与旧引擎目录全程保留，不需要重下。
+**回滚**：引擎层面停服务 → 等显存 <1000 MiB → 换回旧 `engine/` 目录；但**旧模型与旧 tree 已在 2026-11-08 物理删除**，
+模型回滚要重下权重并重建 pack（见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md) §12）。
 
 ### 1.1 0.2.9 起（0.2.10 / 0.2.12 沿用）服务端会自动塞 11 个环境变量（要知道，不然会误判"参数没生效"）
 
@@ -150,7 +150,7 @@ curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;d=json.load(sys.stdin
 
 # 文本（OpenAI chat；服务端不支持 /v1/completions）
 curl -s 127.0.0.1:8000/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"qwen3.8-flash-next-davidau-iq3s-ablit","messages":[{"role":"user","content":"你好"}],"max_tokens":64,"stream":false}'
+  -d '{"model":"qwen3.8-flash-next-q4kxl-ablit","messages":[{"role":"user","content":"你好"}],"max_tokens":64,"stream":false}'
 
 # 关思考 + 固定输出（基准里用同一套）
 #   "chat_template_kwargs":{"enable_thinking":false}
