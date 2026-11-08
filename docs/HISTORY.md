@@ -6,13 +6,13 @@
 
 | 版本 | 时间 | 引擎 / 权重 | 一句话结果 | 状态 |
 |---|---|---|---|---|
-| **v5.9** | 2026-11-08 | **Strata 0.2.12 + engine 0.1.58** / **unsloth UD-Q4_K_XL（4-bit）+ huihui-ai v2 消融** | 换模型：WorkBuddy 原失败题 0.1666→**0.8917**、0.0→**0.6923**；速度降（4 并发 215→186 t/s，单流 158–164→133–135 t/s）；96/96 张量消融、pack v4、froggeric v22.5（28,226 字符）、验收 29/29，见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md) | ✅ 当前 |
-| v5.8 | 2026-11-08 | **Strata 0.2.12 + engine 0.1.58** / DavidAU IQ3_S（3.5 bpw） | **速度持平**（6.25K prompt 5,177 t/s、12.7K 5,526 t/s、4 并发 215 t/s），换的是 7 条工具调用修复（`#4828` 强制 tool_choice 0/24→24/24）+ 引擎 `#5108` 长 CUDA prompt 行表越界；W16 cache 仍 **0 MiB**；停机 48 s，验收 24/24，见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md) | 被 v5.9 取代 |
+| **v5.9** | 2026-11-08 | **Strata 0.2.12 + engine 0.1.58** / **unsloth UD-Q4_K_XL（4-bit）+ huihui-ai v2 消融** | 换模型：WorkBuddy 原失败题 0.1666→**0.8917**、0.0→**0.6923**；速度降（4 并发 215→186 t/s；单流 158–164→**112.8 t/s default**、133–135 t/s effort=low）；96/96 张量消融、pack v4、froggeric v22.5（28,226 字符）、验收 29/29，见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md) | ✅ 当前 |
+| v5.8 | 2026-11-08 | **Strata 0.2.12 + engine 0.1.58** / DavidAU IQ3_S（3.4 bpw） | **速度持平**（6.25K prompt 5,177 t/s、12.7K 5,526 t/s、4 并发 215 t/s），换的是 7 条工具调用修复（`#4828` 强制 tool_choice 0/24→24/24）+ 引擎 `#5108` 长 CUDA prompt 行表越界；W16 cache 仍 **0 MiB**；停机 48 s，验收 24/24，见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md) | 被 v5.9 取代 |
 | v5.7 | 2026-11-06 | Strata 0.2.11 + engine 0.1.57 / DavidAU IQ3_S | **FP16 weight cache 在 48 GB 上未启用（0 MiB，需留 3 GiB 空闲）**，换的是 4 条修复（#2518 slot 串台、#5040/#4701 流式工具尾段、#4451 重启后旧请求挂新 slot、#4271 断流不再占 slot）；停机 47 s，验收 24/24，见 [STRATA-UPSTREAM-2026-11-06.md](STRATA-UPSTREAM-2026-11-06.md) | 被 v5.8 取代 |
 | v5.6 | 2026-11-03 | Strata 0.2.10 + engine 0.1.56 / DavidAU IQ3_S | 性能零收益、纯修复（DFlash2 与 4 并发互斥）；停机 47 s，验收 23/23，见 [STRATA-UPSTREAM-2026-11-03.md](STRATA-UPSTREAM-2026-11-03.md) | 被 v5.7 取代 |
 | v5.5 | 2026-11-01 | Strata 0.2.9 + engine 0.1.55 / DavidAU IQ3_S | 第一个"默认开性能开关"的版本（并行栈 9 项 + GDN 张量核）；停机 47 s，验收 21/21 | 被 v5.6 取代 |
 | v5.4 | 2026-10-28 | Strata 0.2.7 + engine 0.1.52 / DavidAU IQ3_S | sm_89 实测速度表（结果 bit-for-bit 不变）+ 会话缓存/读表修复；停机 63 s | 被 v5.5 取代 |
-| v5.3 | 2026-10-22 | Strata 0.2.2 + engine 0.1.47 / DavidAU IQ3_S（3.5 bpw） | 2026-10-25 用 vLLM 基准复测，见 [BENCHMARK.md](BENCHMARK.md) | 被 v5.4 取代 |
+| v5.3 | 2026-10-22 | Strata 0.2.2 + engine 0.1.47 / DavidAU IQ3_S（3.4 bpw） | 2026-10-25 用 vLLM 基准复测，见 [BENCHMARK.md](BENCHMARK.md) | 被 v5.4 取代 |
 | v5.2 | 2026-10-18 | Strata 0.1.45 / DavidAU IQ3_S | 换模型：decode +10%、1K TTFT −49%、32K/100K decode +34%/+31%；拒答 4.55%→0% | 被 v5.3 取代 |
 | v5.1 | 2026-10-18 | Strata 0.1.45 / unsloth UD-Q4_K_XL + ESP 破限 | 引擎小版本：短上下文 decode 139.7→144.5 t/s、32K TTFT 9.50→6.99 s | 被 v5.2 取代；UD-Q4 权重已删 |
 | v5.0 | 2026-10-13 | Strata 0.1.43.1 / unsloth UD-Q4_K_XL + ESP | 切引擎：单流 decode 59.1→118 t/s、TTFT 2.73→0.20 s（对 v4） | 被 v5.1 取代 |
@@ -41,7 +41,7 @@
   同协议实测 6.25K prompt 5,177 t/s、12.7K 5,526 t/s、4 并发 215 t/s，与 0.1.57 差在 ±1% 噪声内；停机 48 s。见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md)。
 - **v5.9（换模型）**：引擎不动，权重从 DavidAU IQ3_S（83.86 GB，3.4 bpw）换成官方 unsloth v3.1 **UD-Q4_K_XL**（111.33 GB），
   再用 huihui-ai v2 的 `patch-all` 消融 96 个 `ssm_out` / `attn_output` / `ffn_down_shexp` 张量（不动 routed experts），pack 用 `iq_pack.py` 现建 v4，
-  模板换回 froggeric v22.5。质量明显上行，代价是 33% 的权重体积：4 并发 215→186 t/s、单流 158–164→133–135 t/s。见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)。
+  模板换回 froggeric v22.5。质量明显上行，代价是 33% 的权重体积：4 并发 215→186 t/s；单流 158–164→**112.8 t/s（default）**、133–135 t/s（`reasoning_effort=low`）。见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)。
 - **遗留**：`#3952`（sm_89 + 262144 ctx + `--spec 4` 的 VRAM 崩塌报告）仍 open；我们靠 `--vram-reserve-mib 2560` + `--kv-resident 32768` 维持 ~2,480 MiB 余量。
   `PLE table mlock failed` 仍在：`LimitMEMLOCK` 只有 8 MiB，且 `user@1000.service` 自身硬上限就是 8 MiB，transient 单元抬不上去；要锁 PLE 表得 root 加 `user@.service.d/` drop-in（上游称最多 +6% decode）。
 - **没做严格的交错 A/B**：每代引擎各需一次重启，生产中断代价大于 5% 量级的收益；现有数字只能说明"没有可见回退"。

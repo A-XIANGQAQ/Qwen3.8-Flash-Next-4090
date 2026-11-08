@@ -9,7 +9,7 @@
 - CPU：≥32 物理核（38 核实测；MoE experts 的调度/拷贝吃 CPU，但不是主要算力）
 - RAM：**247GB 实测**；官方没有给下限，按「权重 + 专家驻留 + KV 流式」预留，建议 ≥192GB，且不要用 swap 顶容量
   - 权重 111.33GB（4 shards，4-bit）+ 专家驻留（72 GiB 全驻 RAM）+ `--kv-resident 32768` 的 KV 宿主内存
-- 磁盘：模型 112GB + 补丁输出 82GB（shard2/3；shard1/4 硬链）+ 引擎/服务端 ~1GB + venv ~2GB
+- 磁盘：模型 112GB + 补丁输出 82GB（只重写 shard2/3；shard1/4 用软链指回原文件）+ 引擎/服务端 ~1GB + venv ~2GB
 
 ## 2. 软件前提
 
@@ -86,7 +86,7 @@ python3 patch-unsloth-Qwen3.8-Flash-Next-dec.py \
 - 若出现 `Copied because dtype mismatch` 或 `was not found`，说明有目标张量被静默跳过，必须停下核对
 
 可直接用仓库脚本：`bash scripts/patch_and_pack_q4kxl.sh`（内含上述断言）。
-shard1 / shard4 直接硬链进 `<abl>/`，不重写。
+shard1 / shard4 用软链指进 `<abl>/`（实测 `lrwxrwxrwx`），不重写。
 
 ## 5. 生成 Strata pack
 

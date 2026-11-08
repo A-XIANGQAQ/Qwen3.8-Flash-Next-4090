@@ -7,7 +7,7 @@
 
 ## 1. 为什么换
 
-- DavidAU IQ3_S 是 v3.0 时代的 3.5 bpw 打包；unsloth 在 2026-11-04 重发了 v3.1 Dynamic，
+- DavidAU IQ3_S 是 v3.0 时代的 3.4 bpw 打包；unsloth 在 2026-11-04 重发了 v3.1 Dynamic，
   `UD-Q4_K_XL` 约 4.3 bpw 的有效精度（top-1 92.3%、KLD 0.0469），比 IQ3_S 高一个档，且是官方权重。
 - 破限用 huihui-ai v2 的消融补丁：只改 `ssm_out` / `attn_output` / `ffn_down_shexp`
   （`--ablate-experts 2`，`--start-layer 0 --end-layer 48`），**不消融任何 routed expert**，

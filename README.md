@@ -126,7 +126,7 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 - **0.2.12 速度持平、换的是工具调用与健壮性**：`#4828` 多工具 + 强制 `tool_choice` 从 0/24 修到 24/24，另有 `#5312`、`#5409`、`#5276`、`#4832`、`#4622`；引擎 `#5108` 长 CUDA prompt 行表越界 fault、`#5096/#4844` copy 顺序。头部 tuned DFlash2 不适用——它要求「专家全部驻留显卡」，我们 4 slots + 流式专家 ⇒ MTP，不会下载 drafter。
 - 实测（同协议前后）：6.25K prompt **5,177 t/s**、12.7K prompt **5,526 t/s**、4 并发聚合 **215 t/s**，与 0.1.57 差在 ±1% 噪声内；停机 48 s、模板 243,742 chars 不变、`build_info "Strata 0.1.58"`、验收 24/24、`drafting = mtp`。
 - **v5.9 换的是模型，不是引擎**：0.2.12 + 0.1.58 不动，权重换 unsloth UD-Q4_K_XL + huihui v2 消融 + froggeric v22.5；质量升、速度降，见 [STRATA-MODEL-2026-11-08.md](docs/STRATA-MODEL-2026-11-08.md)。
-- 回滚：IQ3_S 模型、pack 与 0.2.2–0.2.11 旧树**已物理删除**，回滚要重下 84 GB + 重建 pack；生产现在只有 `run_strata_q4kxl.sh` 一套。
+- 回滚：IQ3_S 模型、pack 与 0.2.2–0.2.11 旧树**已物理删除**，回滚要重下 84 GB + 重建 pack；生产现在只有 `run_strata_q4kxl.sh` 一套（`run_strata.sh` 已改为指向它的入口）。
 
 ## 边界与未验证
 
