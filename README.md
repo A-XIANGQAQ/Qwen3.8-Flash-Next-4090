@@ -142,7 +142,7 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 
 | 版本 | 运行时 / 权重 | 一句话 |
 |---|---|---|
-| **v5.9（当前）** | Strata 0.2.12 + 0.1.58 / **unsloth UD-Q4_K_XL + huihui v2 破限** | 换模型：质量升（WorkBuddy 0.17→0.89、0→0.69），速度降（4 并发 215→186 t/s）；froggeric v22.5、验收 29/29 |
+| **v5.9（当前）** | Strata 0.2.12 + 0.1.58 / **unsloth UD-Q4_K_XL + huihui v2 破限** | 换模型：质量升（WorkBuddy 0.17→0.89、0→0.69），速度降（4 并发 215→186 t/s）；froggeric v22.5、验收 31/31 |
 | v5.8 | Strata 0.2.12 + 0.1.58 / DavidAU IQ3_S | 速度持平；7 条工具调用修复（`#4828` 0/24→24/24）+ `#5108`；停机 48 s、验收 24/24 |
 | v5.7 | Strata 0.2.11 + 0.1.57 / DavidAU IQ3_S | W16 cache 在 48 GB 上未启用（0 MiB）；换 4 条 slot/工具流修复；停机 47 s、验收 24/24 |
 | v5.3 | Strata 0.2.2 + 0.1.47 / DavidAU IQ3_S | 2026-10-25 vLLM 基准：decode 167–177 t/s、prefill ~3.9–4.05K t/s、256K 首测 |

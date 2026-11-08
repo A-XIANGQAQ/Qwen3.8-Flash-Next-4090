@@ -98,12 +98,12 @@ tokenizer：vocab 248,320 / merges 247,587 / eos 248,046 / bos=pad 248,044。
 | 停机 | **9 s**（stop 到显存 9 MiB） |
 | 冷启动 | **106 s**（页缓存冷；arena 每次启动都重填，本次 1.68 GiB/s） |
 | 热启动 | **53 s**（页缓存命中，12.49 GiB/s；PLE 加载 14.4 s → 0.1 s） |
-| 验收 | **29/29 PASS**（`scripts/accept_q4kxl.sh`） |
+| 验收 | **31/31 PASS**（`scripts/accept_q4kxl.sh`） |
 | `/health` | `model=qwen3.8-flash-next-q4kxl-ablit`、`max_context=262144`、`images=true` |
 | `/props` | `build_info "Strata 0.1.58"`、`len(chat_template) = 28226` |
 
 验收首跑 4 个 FAIL 全是测试脚本自身解析 bug（`/metrics` 是 `{"engine":{…}}` 双层，`jget()` 取错层）；
-修正解析后 28/28（脚本后来加了 model 断言与更严的 PLE/MTP 检查，现为 29 项），不是服务端问题。
+修正解析后 28/28（脚本后来加了 model、expert_slots、pcie_frac 断言与更严的 PLE/MTP 检查，现为 31 项），不是服务端问题。
 
 ## 8. 实测（同机同协议，对照 0.1.58 + IQ3_S）
 

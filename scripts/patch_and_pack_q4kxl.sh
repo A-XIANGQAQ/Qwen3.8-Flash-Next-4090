@@ -1,22 +1,53 @@
 #!/usr/bin/env bash
 # 在官方 unsloth UD-Q4_K_XL(v3.1) 上打 huihui v2 破限补丁，然后建 Strata pack。
 # 只重写 shard2/shard3（目标张量全在这两片，且都是 Q8_0）；shard1/4 无目标张量，软链指回官方文件。
+#
+# 依赖：$STRATA_PY（或 strata/venv、strata/Strata/.venv）里装了 numpy/requirements，
+#       且能 import gguf（STRATA_GGUF_PY 指向任意 llama.cpp checkout 的 gguf-py）。
+# 可覆盖：STRATA_ROOT（工作区根）、STRATA_SRC（UD-Q4_K_XL 四片所在目录）、STRATA_WORK（临时目录）。
 set -euo pipefail
 
-ROOT=${STRATA_ROOT:-/home/gfyd-ai/dsh_workspace}
 REPO=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=${STRATA_ROOT:-$(cd "$REPO/.." && pwd)}
 S=$ROOT/strata
+
 PY=${STRATA_PY:-}
 if [ -z "$PY" ]; then
   for c in "$S/venv/bin/python" "$S/Strata/.venv/bin/python"; do [ -x "$c" ] && PY=$c && break; done
 fi
 [ -n "$PY" ] || { echo "FAIL: 需要装了 requirements 的 venv python（设 STRATA_PY）"; exit 1; }
-SRC=$ROOT/models/unsloth-UD-Q4_K_XL
+
+# gguf-py 不能绑死在某个安装布局上：先用现成 import，再试 STRATA_GGUF_PY / 常见目录。
+if ! "$PY" -c 'import gguf' >/dev/null 2>&1; then
+  for g in "${STRATA_GGUF_PY:-}" \
+           "$S/Strata/third_party/llama.cpp/gguf-py" \
+           "$S/Strata-0.2.12/third_party/llama.cpp/gguf-py" \
+           "$ROOT/.ref/llama.cpp/gguf-py"; do
+    if [ -n "$g" ] && [ -d "$g/gguf" ]; then
+      export STRATA_GGUF_PY=$g
+      export PYTHONPATH=$g${PYTHONPATH:+:$PYTHONPATH}
+      break
+    fi
+  done
+fi
+"$PY" -c 'import gguf' >/dev/null 2>&1 || {
+  echo "FAIL: $PY 不能 import gguf。装一个 llama.cpp 的 gguf-py 并设 STRATA_GGUF_PY=<llama.cpp>/gguf-py"
+  exit 1
+}
+
+# 下载布局有两种：--local_dir 直接平铺，或 modelscope 保留 UD-Q4_K_XL/ 子目录。
+SRC=${STRATA_SRC:-}
+if [ -z "$SRC" ]; then
+  for d in "$ROOT/models/unsloth-UD-Q4_K_XL" "$ROOT/models/unsloth-UD-Q4_K_XL/UD-Q4_K_XL"; do
+    if [ -s "$d/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf" ]; then SRC=$d; break; fi
+  done
+fi
+[ -n "$SRC" ] || { echo "FAIL: 找不到 UD-Q4_K_XL 四片（设 STRATA_SRC）"; exit 1; }
+
 ABL=$ROOT/models/unsloth-UD-Q4_K_XL-abliterated
 PDIR=$ROOT/models/patch-huihui-v2
 PS=$PDIR/patch-unsloth-Qwen3.8-Flash-Next-dec.py
 PATCH=$PDIR/patch-unsloth-all
-export PYTHONPATH=$S/Strata/third_party/llama.cpp/gguf-py
 WORK=${STRATA_WORK:-${TMPDIR:-/tmp}/strata-q4kxl-patch}
 mkdir -p "$ABL" "$WORK/pin2" "$WORK/pin3"
 
@@ -26,22 +57,23 @@ n1=Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
 n4=Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf
 
 for f in "$n1" "$n2" "$n3" "$n4"; do [ -s "$SRC/$f" ] || { echo "missing $SRC/$f"; exit 1; }; done
+[ -s "$PS" ] || { echo "missing $PS"; exit 1; }
 [ -s "$PATCH/Huihui-Qwen3.8-Flash-Next-abliterated-patch-all.gguf" ] || { echo "missing patch gguf"; exit 1; }
 [ -s "$PATCH/Huihui-Qwen3.8-Flash-Next-abliterated-patch-all.gguf.key" ] || { echo "missing patch key"; exit 1; }
 
 ln -sfn "$SRC/$n1" "$ABL/$n1"
 ln -sfn "$SRC/$n4" "$ABL/$n4"
-ln -sf "$SRC/$n2" "$WORK"/pin2/$n2
-ln -sf "$SRC/$n3" "$WORK"/pin3/$n3
+ln -sfn "$SRC/$n2" "$WORK"/pin2/$n2
+ln -sfn "$SRC/$n3" "$WORK"/pin3/$n3
 
 redact() { sed -E 's/(Using key \([0-9]+ bytes\): ).*/\1<redacted>/'; }
 
 echo "== patch shard2 $(date +%T)"
-python3 "$PS" --input-path "$WORK"/pin2 --patch-path "$PATCH" --output-path "$ABL" \
+"$PY" "$PS" --input-path "$WORK"/pin2 --patch-path "$PATCH" --output-path "$ABL" \
   --start-layer 0 --end-layer 48 --ablate-experts 2 2>&1 | redact | tee "$WORK"/patch2.log | tail -6
 
 echo "== patch shard3 $(date +%T)"
-python3 "$PS" --input-path "$WORK"/pin3 --patch-path "$PATCH" --output-path "$ABL" \
+"$PY" "$PS" --input-path "$WORK"/pin3 --patch-path "$PATCH" --output-path "$ABL" \
   --start-layer 0 --end-layer 48 --ablate-experts 2 2>&1 | redact | tee "$WORK"/patch3.log | tail -6
 
 [ -s "$ABL/$n2" ] && [ -s "$ABL/$n3" ] || { echo "FAIL 补丁输出缺失"; exit 1; }
