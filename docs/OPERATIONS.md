@@ -150,7 +150,7 @@ curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;d=json.load(sys.stdin
 
 # 文本（OpenAI chat；服务端不支持 /v1/completions）
 curl -s 127.0.0.1:8000/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"qwen3.8-flash-next-q4kxl-ablit","messages":[{"role":"user","content":"你好"}],"max_tokens":64,"stream":false}'
+  -d '{"model":"qwen3.8-flash-next-q4kxl-ablit-l1","messages":[{"role":"user","content":"你好"}],"max_tokens":64,"stream":false}'
 
 # 关思考 + 固定输出（基准里用同一套）
 #   "chat_template_kwargs":{"enable_thinking":false}

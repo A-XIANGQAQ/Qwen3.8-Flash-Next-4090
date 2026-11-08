@@ -44,7 +44,12 @@ if [ -z "$SRC" ]; then
 fi
 [ -n "$SRC" ] || { echo "FAIL: 找不到 UD-Q4_K_XL 四片（设 STRATA_SRC）"; exit 1; }
 
-ABL=$ROOT/models/unsloth-UD-Q4_K_XL-abliterated
+# 消融档位与输出位置可覆盖，默认是 huihui v2 发布版所用的轻档 1（ssm_out + attn_output）。
+# 档位说明：0 = ssm_out + ffn_down_shexp；1 = ssm_out + attn_output；2 = 三者全消（最重）。
+ABLATE=${STRATA_ABLATE:-1}
+case "$ABLATE" in 0|1|2) ;; *) echo "FAIL: STRATA_ABLATE 只能是 0/1/2"; exit 1;; esac
+ABL=${STRATA_ABL_DST:-$ROOT/models/unsloth-UD-Q4_K_XL-abliterated-l$ABLATE}
+PACK_OUT=${STRATA_PACK_OUT:-$S/Strata-data/packs/unsloth-ud-q4kxl-ablit-l$ABLATE}
 PDIR=$ROOT/models/patch-huihui-v2
 PS=$PDIR/patch-unsloth-Qwen3.8-Flash-Next-dec.py
 PATCH=$PDIR/patch-unsloth-all
@@ -68,40 +73,44 @@ ln -sfn "$SRC/$n3" "$WORK"/pin3/$n3
 
 redact() { sed -E 's/(Using key \([0-9]+ bytes\): ).*/\1<redacted>/'; }
 
-echo "== patch shard2 $(date +%T)"
+echo "== patch shard2 (ablate=$ABLATE -> $ABL) $(date +%T)"
 "$PY" "$PS" --input-path "$WORK"/pin2 --patch-path "$PATCH" --output-path "$ABL" \
-  --start-layer 0 --end-layer 48 --ablate-experts 2 2>&1 | redact | tee "$WORK"/patch2.log | tail -6
+  --start-layer 0 --end-layer 48 --ablate-experts "$ABLATE" 2>&1 | redact | tee "$WORK"/patch2.log | tail -6
 
 echo "== patch shard3 $(date +%T)"
 "$PY" "$PS" --input-path "$WORK"/pin3 --patch-path "$PATCH" --output-path "$ABL" \
-  --start-layer 0 --end-layer 48 --ablate-experts 2 2>&1 | redact | tee "$WORK"/patch3.log | tail -6
+  --start-layer 0 --end-layer 48 --ablate-experts "$ABLATE" 2>&1 | redact | tee "$WORK"/patch3.log | tail -6
 
 [ -s "$ABL/$n2" ] && [ -s "$ABL/$n3" ] || { echo "FAIL 补丁输出缺失"; exit 1; }
 echo "== checks（0 张量/类型不匹配都必须失败，不能只看输出文件存在）"
 grep -q "Patch files (1)" "$WORK"/patch2.log || { echo "FAIL shard2 补丁未加载"; exit 1; }
 grep -q "Patch files (1)" "$WORK"/patch3.log || { echo "FAIL shard3 补丁未加载"; exit 1; }
-p2=$(grep -c "Patched tensors: 57" "$WORK"/patch2.log || true)
-p3=$(grep -c "Patched tensors: 39" "$WORK"/patch3.log || true)
+# 期望张量数随档位变化（huihui patch 里 Q8_0 版的命中数）：0=84、1=48、2=96。
+# 不按分片写死：shard2/3 的层边界在 layer 28 上不是整数切分（实测 1 档为 28/20）。
+case "$ABLATE" in 0) want=84;; 1) want=48;; 2) want=96;; esac
+p2=$(grep -oE "Patched tensors: [0-9]+" "$WORK"/patch2.log | tail -1 | awk '{print $3}')
+p3=$(grep -oE "Patched tensors: [0-9]+" "$WORK"/patch3.log | tail -1 | awk '{print $3}')
 mm=$(cat "$WORK"/patch2.log "$WORK"/patch3.log | grep -c "Copied because dtype mismatch" || true)
 nf=$(cat "$WORK"/patch2.log "$WORK"/patch3.log | grep -c "was not found" || true)
-echo "patched shard2=$p2 shard3=$p3 | dtype mismatch=$mm | not found=$nf"
-[ "$p2" = 1 ] && [ "$p3" = 1 ] || { echo "FAIL patched 张量数不对（期望 57/39）"; exit 1; }
+total=$((${p2:-0}+${p3:-0}))
+echo "patched shard2=$p2 shard3=$p3 total=$total (want $want) | dtype mismatch=$mm | not found=$nf"
+[ "$total" = "$want" ] || { echo "FAIL patched 张量数 $total，档位 $ABLATE 期望 $want"; exit 1; }
 [ "$mm" = 0 ] && [ "$nf" = 0 ] || { echo "FAIL 有张量被静默跳过"; exit 1; }
 ls -l "$ABL"
 
 echo "== build pack $(date +%T)"
 "$PY" "$S/Strata-0.2.12/tools/iq_pack.py" --gguf "$ABL/$n1" \
-  --out "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit" --compat-bf16 \
+  --out "$PACK_OUT" --compat-bf16 \
   2>&1 | tee "$WORK"/iqpack.log | tail -8
 
-[ -s "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit/native_experts.txt" ] || { echo "FAIL pack 缺 native_experts.txt（iq_pack 未完成）"; exit 1; }
+[ -s "$PACK_OUT/native_experts.txt" ] || { echo "FAIL pack 缺 native_experts.txt（iq_pack 未完成）"; exit 1; }
 echo "== template（unsloth 基线用回 froggeric v22.5，不套 DavidAU 的模式体）"
 cp -f "$REPO/patches/froggeric_v22.5.jinja" \
-      "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit/tokenizer/chat_template.jinja"
-TS=$(wc -c < "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit/tokenizer/chat_template.jinja")
+      "$PACK_OUT/tokenizer/chat_template.jinja"
+TS=$(wc -c < "$PACK_OUT/tokenizer/chat_template.jinja")
 [ "$TS" = 28234 ] || { echo "FAIL 模板 $TS B（期望 28234）"; exit 1; }
 echo "template = $TS B"
-head -3 "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit/native_experts.txt"
-ls -l "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit"
+head -3 "$PACK_OUT/native_experts.txt"
+ls -l "$PACK_OUT"
 echo "== DONE $(date +%T)"
 df -h "$ROOT" | tail -1

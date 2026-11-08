@@ -2,7 +2,7 @@
 """Prefill throughput: prompt_tokens / TTFT on uncached prompts (unique header per run)."""
 import json, os, sys, time, urllib.request, statistics, random, string
 BASE=os.environ.get("STRATA_BASE","http://127.0.0.1:8000")
-MODEL=os.environ.get("STRATA_MODEL","qwen3.8-flash-next-q4kxl-ablit")
+MODEL=os.environ.get("STRATA_MODEL","qwen3.8-flash-next-q4kxl-ablit-l1")
 PARA=("在分布式的推理系统里，专家并行的调度需要同时考虑显存占用、跨卡带宽和请求的到达分布。"
       "每一次前向传播都要决定哪些专家驻留在显卡上，哪些留在主机内存里，以及哪些需要临时换入。"
       "这些决定会直接影响首 token 的延迟，也会影响长上下文场景下整体的吞吐表现。")

@@ -75,11 +75,11 @@ v5.3 时期（2026-10-25）用 **vLLM 官方 benchmark** 重测了 prefill / dec
 
 | 层 | 固定身份 |
 |---|---|
-| 模型 | `unsloth/Qwen3.8-Flash-Next-GGUF` → **UD-Q4_K_XL**（111.33 GB / 4 shards，4-bit；huihui-ai v2 消融 96 张量） |
+| 模型 | `unsloth/Qwen3.8-Flash-Next-GGUF` → **UD-Q4_K_XL**（111.33 GB / 4 shards，4-bit；huihui-ai v2 消融 48 张量（档 1）） |
 | 引擎 | [Niko1221/Strata](https://github.com/Niko1221/Strata) **0.2.12 服务端 + 0.1.58 预编译引擎**（CUDA 13，arch 含 sm_89，sha256 与签名 feed 一致 `bbbfa826…09d54`） |
 | 并发 / 上下文 | `--batch 4` × `--max-context 262144`（每 slot 独立 session） |
 | KV | **`k8v4` + `--kv-resident 32768`**（816 B/cell；KV 流式到宿主内存，4×256K 全放显存会 OOM） |
-| 破限 | **huihui-ai v2 消融补丁**（`ssm_out` / `attn_output` / `ffn_down_shexp`，96/96 命中，不动 routed experts）；强探针 8/8 不拒答 |
+| 破限 | **huihui-ai v2 消融补丁**（`ssm_out` / `attn_output`，48/48 命中，不动 routed experts）；强探针 8/8 不拒答 |
 | 图像 | 自带 vision 编码器（`mmproj-BF16.gguf` 0.91 GB，GPU 模式）；`--vram-reserve-mib 2560` |
 | Chat 模板 | **froggeric v22.5**（28,234 B / 28,226 字符）：`reasoning_effort` 全档位（off/low/medium/high/xhigh）+ `{REASON:xxx}` 手动覆盖 + 工具调用修复，**服务端代码一行没改**；DavidAU 的 29 段模式系统随旧模型退役 |
 | GPU | 单 RTX 4090 **48GB** / sm89 / TP1；引擎报告 32,595 MiB 专家缓存 / 10,902 槽（空闲 2,517 MiB） |
@@ -126,7 +126,7 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 - **0.2.12 速度持平、换的是工具调用与健壮性**：`#4828` 多工具 + 强制 `tool_choice` 从 0/24 修到 24/24，另有 `#5312`、`#5409`、`#5276`、`#4832`、`#4622`；引擎 `#5108` 长 CUDA prompt 行表越界 fault、`#5096/#4844` copy 顺序。头部 tuned DFlash2 不适用——它要求「专家全部驻留显卡」，我们 4 slots + 流式专家 ⇒ MTP，不会下载 drafter。
 - 实测（同协议前后）：6.25K prompt **5,177 t/s**、12.7K prompt **5,526 t/s**、4 并发聚合 **215 t/s**，与 0.1.57 差在 ±1% 噪声内；停机 48 s、模板 243,742 chars 不变、`build_info "Strata 0.1.58"`、验收 24/24、`drafting = mtp`。
 - **v5.9 换的是模型，不是引擎**：0.2.12 + 0.1.58 不动，权重换 unsloth UD-Q4_K_XL + huihui v2 消融 + froggeric v22.5；质量升、速度降，见 [STRATA-MODEL-2026-11-08.md](docs/STRATA-MODEL-2026-11-08.md)。
-- 回滚：IQ3_S 模型、pack 与 0.2.2–0.2.11 旧树**已物理删除**，回滚要重下 84 GB + 重建 pack；生产现在只有 `run_strata_q4kxl.sh` 一套（`run_strata.sh` 已改为指向它的入口）。
+- 回滚：IQ3_S 模型、pack 与 0.2.2–0.2.11 旧树**已物理删除**，回滚要重下 84 GB + 重建 pack；生产入口是 `run_strata_q4l1.sh`（`run_strata.sh` 已改为指向它）；`run_strata_q4stock.sh` / `run_strata_q4kxl.sh` 保留作回退。
 
 ## 边界与未验证
 

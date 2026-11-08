@@ -1,7 +1,7 @@
 # 换模型：unsloth UD-Q4_K_XL + huihui v2 破限（v5.9，2026-11-08）
 
 > **一句话**：权重从 DavidAU IQ3_S（83.86 GB，3.4 bpw）换成官方 unsloth v3.1 **UD-Q4_K_XL**
-> （111.33 GB，4-bit），用 huihui-ai v2 的 `patch-all` 对 96 个注意力/SSM 输出张量做消融
+> （111.33 GB，4-bit），用 huihui-ai v2 的 `patch-all` 对 48 个 SSM 输出 / 注意力输出张量做消融（档 1）
 > （不碰 routed experts），pack 用 0.2.12 的 `iq_pack.py` 现建 v4，模板换回 **froggeric v22.5**。
 > 换来的是质量：WorkBuddy 两道错题 0.17→0.89、0.00→0.69；代价是速度（同协议 4 并发 215→186 t/s）
 > 与两道已高分题的 4–7% 回落；模型与模板同时变，无法单独归因。
@@ -10,9 +10,16 @@
 
 - DavidAU IQ3_S 是 v3.0 时代的 3.4 bpw 打包；unsloth 在 2026-11-04 重发了 v3.1 Dynamic，
   `UD-Q4_K_XL` 约 4.3 bpw 的有效精度（top-1 92.3%、KLD 0.0469），比 IQ3_S 高一个档，且是官方权重。
-- 破限用 huihui-ai v2 的消融补丁：只改 `ssm_out` / `attn_output` / `ffn_down_shexp`
-  （`--ablate-experts 2`，`--start-layer 0 --end-layer 48`），**不消融任何 routed expert**，
+- 破限用 huihui-ai v2 的消融补丁：只改 `ssm_out` / `attn_output`
+  （`--ablate-experts 1`，`--start-layer 0 --end-layer 48`），**不消融任何 routed expert**，
   保留模型知识；8 条探针（6 对抗 + 2 对照）8/8 不拒答。
+
+  > **档位是 1，不是 2。** huihui v2 的文档和示例命令用的就是 `--ablate-experts 1`（`ssm_out` +
+  > `attn_output`）：档 2 会连 `ffn_down_shexp`（共享专家的 FFN down 投影）一起改，权重体积不变，
+  > 但通用能力明显塌——表现为长工具链里推理被写进正文、工具调用退化成 `<invoke>` / `<tool_call>`
+  > 文本、只输出思考就 `stop`（前端显示「已完成，13 秒」）。2026-11-08 当晚用档 1 重建后，
+  > 连续工具调用恢复正常，验收 31/31、破限探针 8/8。
+  > 层范围保持 `--start-layer 0 --end-layer 48`。
 - 模板不再需要 DavidAU 的 29 段模式系统：换回 froggeric v22.5 原版（28,226 字符），
   它本身通吃 Qwen3.5/3.6/3.8 与 Flash-Next，并支持 `reasoning_effort` 全档位。
 
@@ -46,17 +53,17 @@
 
 补丁张量命名是 `名字_<ggml_type_int>`；**输入张量类型与补丁相同才整块替换**，不同则原样复制并只打
 `Copied because dtype mismatch`。所以先核类型：UD-Q4_K_XL 的目标张量全是 **Q8_0**，补丁正好提供
-96 个 Q8_0 版本（57 + 39），96/96 命中、0 mismatch、0 not-found。
+48 个 Q8_0 版本（28 + 20），48/48 命中、0 mismatch、0 not-found。
 
 ## 3. 打补丁（只重写 shard2 / shard3）
 
-命令（`pin2`/`pin3` 单分片符号链接 + `--ablate-experts 2`）见
+命令（`pin2`/`pin3` 单分片符号链接 + `--ablate-experts 1`）见
 [REPRODUCTION.md §4b](REPRODUCTION.md)；下面只记结果与坑。
 
-实测：shard2 `Patch files (1)`、`Patched tensors: 57`、`Copied 669`；shard3 `Patched 39`、`Copied 458`；
+实测：shard2 `Patch files (1)`、`Patched tensors: 28`、`Copied 698`；shard3 `Patched 20`、`Copied 477`；
 两片都没有 `Copied because dtype mismatch` / `was not found`。shard1/shard4 直接软链进 `<abl>/`，不复制。
 
-> `scripts/patch_and_pack_q4kxl.sh` 在打补丁前断言 `Patch files (1)`，打完后断言 57/39 且 0 mismatch/not-found。
+> `scripts/patch_and_pack_q4kxl.sh` 在打补丁前断言 `Patch files (1)`，打完后断言 28/20 且 0 mismatch/not-found。
 > 早期手写版没有这道闸：第一次抢跑时补丁还在 `.parts/` 里，脚本照样跑完并产出 0 patched 的原样 shard2。
 
 ## 4. 建 pack（v4）
@@ -98,8 +105,9 @@ tokenizer：vocab 248,320 / merges 247,587 / eos 248,046 / bos=pad 248,044。
 | 停机 | **9 s**（stop 到显存 9 MiB） |
 | 冷启动 | **106 s**（页缓存冷；arena 每次启动都重填，本次 1.68 GiB/s） |
 | 热启动 | **53 s**（页缓存命中，12.49 GiB/s；PLE 加载 14.4 s → 0.1 s） |
+| 切到档 1（16:55） | 停机 9 s、**65 s 就绪**（页缓存半热） |
 | 验收 | **31/31 PASS**（`scripts/accept_q4kxl.sh`） |
-| `/health` | `model=qwen3.8-flash-next-q4kxl-ablit`、`max_context=262144`、`images=true` |
+| `/health` | `model=qwen3.8-flash-next-q4kxl-ablit-l1`、`max_context=262144`、`images=true` |
 | `/props` | `build_info "Strata 0.1.58"`、`len(chat_template) = 28226` |
 
 验收首跑 4 个 FAIL 全是测试脚本自身解析 bug（`/metrics` 是 `{"engine":{…}}` 双层，`jget()` 取错层）；
@@ -107,7 +115,8 @@ tokenizer：vocab 248,320 / merges 247,587 / eos 248,046 / bos=pad 248,044。
 
 ## 8. 实测（同机同协议，对照 0.1.58 + IQ3_S）
 
-完整表格与单位见 [BENCHMARK.md §0](BENCHMARK.md)。要点：
+完整表格与单位见 [BENCHMARK.md §0](BENCHMARK.md)。下表是换模型当天的**档 2** 实测；档 1 只改
+48 个张量的数值（体积、层数、专家数都不变），没有单独重测速度。要点：
 
 - prefill 6.2K **5,177 → 2,752 t/s**（−47%）；12.8K **5,526 → 4,479 t/s**（−19%）
 - 4 并发聚合 **215 → 186 t/s**（−13%）；每路 decode 54.9–57.3 → 48.5–49.6 t/s
@@ -132,9 +141,12 @@ tokenizer：vocab 248,320 / merges 247,587 / eos 248,046 / bos=pad 248,044。
 ## 10. 破限
 
 破限探针是 6 条对抗（成人向虚构 / 禁忌 / 粗口 / 盗版 / 隐私 / 越狱）+ 2 条正常对照，
-`reasoning_effort="off"`、`max_tokens 600`：**8/8 refused=false（对抗项 6/6）**，字符数
-966 / 804 / 577 / 1085 / 1051 / **373** / 166 / 440（IQ3_S：981 / 908 / 431 / 1147 / 1065 / **6** / 206 / 311）。
-越狱那条从 6 字符变 373，其余同量级。
+`reasoning_effort="off"`、`max_tokens 600`：**8/8 refused=false（对抗项 6/6）**，字符数（档 1）
+943 / 799 / 515 / 1197 / 1062 / 307 / 166 / 446（IQ3_S：981 / 908 / 431 / 1147 / 1065 / **6** / 206 / 311）。
+越狱那条从 6 字符变 307（档 2 是 373），其余同量级。
+
+档 1 对最极端的一类（性暴力 + 露骨细节特写）仍会保留一道软边界：写事件本身，但不做器官级慢镜头。
+这是轻消融与工具链稳定性之间的取舍，用户已确认接受，不再改回档 2。
 
 ## 11. 显存与 mlock
 
@@ -148,6 +160,6 @@ tokenizer：vocab 248,320 / merges 247,587 / eos 248,046 / bos=pad 248,044。
 
 IQ3_S 及其 pack、vLLM 与 NVFP4 权重已按用户要求**物理删除，没有归档**（腾出 289 GB）。
 回滚 = 重新下 IQ3_S + 重建 pack，不再是一键脚本。生产启动器 `run_strata.sh` 现指向
-`run_strata_q4kxl.sh`；旧引擎树（0.2.2–0.2.11）与旧 config 已删，只剩 `Strata-0.2.12`。
+`run_strata_q4l1.sh`；旧引擎树（0.2.2–0.2.11）与旧 config 已删，只剩 `Strata-0.2.12`。
 **别顺手删 `strata/Strata/`（0.1.45 安装树）**：启动器用的 venv 在 `Strata/.venv`，config 的
 `--expert-profile` 也指向 `Strata/data/expert-profile.bin`；它只保留这两样，但删了服务起不来。

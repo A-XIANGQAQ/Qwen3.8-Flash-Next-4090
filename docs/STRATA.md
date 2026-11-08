@@ -26,12 +26,12 @@ conversation cache、KV 流式与 MTP 投机解码。
 ## 2. 模型：unsloth UD-Q4_K_XL（huihui v2 消融）
 
 `unsloth/Qwen3.8-Flash-Next-GGUF` → `UD-Q4_K_XL/`（v3.1 Dynamic，2026-11-04），再用 huihui-ai v2 的
-`patch-all` 做 96 张量消融。
+`patch-all` 做 48 张量消融（档 1）。
 
 | 项 | 值 |
 |---|---|
 | 量化 | **UD-Q4_K_XL**（4-bit，约 4.3 bpw 有效精度），**111.33 GB / 4 shards** |
-| 破限 | **huihui v2 消融**：`ssm_out` / `attn_output` / `ffn_down_shexp` 共 96 张量，**不动 routed experts**；不需要 ESP 控制向量 |
+| 破限 | **huihui v2 消融**：`ssm_out` / `attn_output` 共 48 张量（档 1），**不动 routed experts**；不需要 ESP 控制向量 |
 | 模板 | **froggeric v22.5**（28,234 B / 28,226 字符），见 §9 |
 | 视觉 | `mmproj-Qwen3.8-Flash-Next-BF16-unsloth.gguf`（907,542,944 B）+ `engine/strata-vision` |
 | PLE 表 | `per_layer_token_embd.weight` 是 **shard4**（IQ4_NL，28.8 GB），由 `--ple-gguf` 指向它 |
@@ -127,7 +127,7 @@ DavidAU 的 29 段模式合并模板（249,545 B）只用于复现 v5.3–v5.8�
 2. 版本/模板：`/props.build_info == "Strata 0.1.58"`，`chat_template` 长度 **28226**
 3. 端到端：一条中文请求正文可读；`/metrics` 的 `live.state` 回到 `idle`
 
-破限判据：来自 huihui v2 消融（96 张量），**不该**出现 ESP 控制向量行；8 条探针（6 对抗 + 2 对照）8/8 不拒答。
+破限判据：来自 huihui v2 消融（48 张量，档 1），**不该**出现 ESP 控制向量行；8 条探针（6 对抗 + 2 对照）8/8 不拒答。
 
 ## 11. 已验证 / 未验证
 

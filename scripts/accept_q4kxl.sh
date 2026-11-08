@@ -6,7 +6,7 @@ set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=${STRATA_ROOT:-$(cd "$HERE/../.." && pwd)}
 B=${STRATA_BASE:-http://127.0.0.1:8000}
-M=${STRATA_MODEL:-qwen3.8-flash-next-q4kxl-ablit}
+M=${STRATA_MODEL:-qwen3.8-flash-next-q4kxl-ablit-l1}
 L=${STRATA_LOG:-$ROOT/strata/strata-unsloth-q4kxl.log}
 
 PY=${STRATA_PY:-}

@@ -321,7 +321,7 @@ curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;print(len(json.load(s
 
 ```bash
 cp qwen4090-repo/patches/froggeric_v22.5.jinja \
-   strata/Strata-data/packs/unsloth-ud-q4kxl-ablit/tokenizer/chat_template.jinja
+   strata/Strata-data/packs/unsloth-ud-q4kxl-ablit-l1/tokenizer/chat_template.jinja
 # 然后重启（热启约 53 秒）
 ```
 

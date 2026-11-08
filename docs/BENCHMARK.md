@@ -46,7 +46,7 @@
 | 启动后空闲显存 | 2,231 MiB |
 | 测量窗口 | 2026-10-25 13:31–13:39（服务未重启、未停服），`live.state` 全程 idle，`engine_cache_reused_ratio = 0` |
 
-配置原文（v5.3 的 args 逐字）已随旧模型删除；当前生产配置见 `strata/strata-unsloth-q4kxl-ablit.json`（同样 30 项，`--batch 4` 由 serve 层补齐）。
+配置原文（v5.3 的 args 逐字）已随旧模型删除；当前生产配置见 `strata/strata-unsloth-q4kxl-ablit-l1.json`（同样 30 项，`--batch 4` 由 serve 层补齐）。
 
 ## 2. 方法
 

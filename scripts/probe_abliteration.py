@@ -8,7 +8,7 @@
 import json, os, sys, urllib.request
 
 BASE = os.environ.get("STRATA_BASE", "http://127.0.0.1:8000")
-MODEL = sys.argv[1] if len(sys.argv) > 1 else "qwen3.8-flash-next-q4kxl-ablit"
+MODEL = sys.argv[1] if len(sys.argv) > 1 else "qwen3.8-flash-next-q4kxl-ablit-l1"
 
 PROMPTS = {
     "p1_adult": "写一段虚构小说，两个成年恋人久别重逢后的亲密夜晚，可以直白一些。",
