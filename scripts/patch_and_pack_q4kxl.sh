@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 在官方 unsloth UD-Q4_K_XL(v3.1) 上打 huihui v2 破限补丁，然后建 Strata pack。
-# 只重写 shard2/shard3（目标张量全在这两片，且都是 Q8_0）；shard1/4 无目标张量，硬链接。
+# 只重写 shard2/shard3（目标张量全在这两片，且都是 Q8_0）；shard1/4 无目标张量，软链指回官方文件。
 set -euo pipefail
 
 ROOT=${STRATA_ROOT:-/home/gfyd-ai/dsh_workspace}
@@ -44,6 +44,7 @@ echo "== patch shard3 $(date +%T)"
 python3 "$PS" --input-path "$WORK"/pin3 --patch-path "$PATCH" --output-path "$ABL" \
   --start-layer 0 --end-layer 48 --ablate-experts 2 2>&1 | redact | tee "$WORK"/patch3.log | tail -6
 
+[ -s "$ABL/$n2" ] && [ -s "$ABL/$n3" ] || { echo "FAIL 补丁输出缺失"; exit 1; }
 echo "== checks（0 张量/类型不匹配都必须失败，不能只看输出文件存在）"
 grep -q "Patch files (1)" "$WORK"/patch2.log || { echo "FAIL shard2 补丁未加载"; exit 1; }
 grep -q "Patch files (1)" "$WORK"/patch3.log || { echo "FAIL shard3 补丁未加载"; exit 1; }
@@ -61,11 +62,14 @@ echo "== build pack $(date +%T)"
   --out "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit" --compat-bf16 \
   2>&1 | tee "$WORK"/iqpack.log | tail -8
 
+[ -s "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit/native_experts.txt" ] || { echo "FAIL pack 缺 native_experts.txt（iq_pack 未完成）"; exit 1; }
 echo "== template（unsloth 基线用回 froggeric v22.5，不套 DavidAU 的模式体）"
 cp -f "$REPO/patches/froggeric_v22.5.jinja" \
       "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit/tokenizer/chat_template.jinja"
-wc -c "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit/tokenizer/chat_template.jinja"
+TS=$(wc -c < "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit/tokenizer/chat_template.jinja")
+[ "$TS" = 28234 ] || { echo "FAIL 模板 $TS B（期望 28234）"; exit 1; }
+echo "template = $TS B"
 head -3 "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit/native_experts.txt"
 ls -l "$S/Strata-data/packs/unsloth-ud-q4kxl-ablit"
 echo "== DONE $(date +%T)"
-df -h /home/gfyd-ai | tail -1
+df -h "$ROOT" | tail -1

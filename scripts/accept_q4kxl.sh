@@ -86,4 +86,4 @@ echo "=== 10. 显存 ==="
 nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits
 
 echo "=== 结果：PASS=$pass FAIL=$fail ==="
-[ "$fail" = 0 ] && echo "OK" || echo "CHECK LOG ABOVE"
+if [ "$fail" = 0 ]; then echo OK; else echo "CHECK LOG ABOVE"; exit 1; fi
