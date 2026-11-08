@@ -77,6 +77,10 @@ ln -s /path/to/...-00003-of-00004.gguf pin3/
 python3 patch-unsloth-Qwen3.8-Flash-Next-dec.py \
   --input-path pin2 --patch-path patch-unsloth-all --output-path <abl>/ \
   --start-layer 0 --end-layer 48 --ablate-experts 2
+# shard3 必须再来一次：只跑 pin2 的话 shard3 从未消融，pack 照样能建、服务照样能起，破限悄悄丢失
+python3 patch-unsloth-Qwen3.8-Flash-Next-dec.py \
+  --input-path pin3 --patch-path patch-unsloth-all --output-path <abl>/ \
+  --start-layer 0 --end-layer 48 --ablate-experts 2
 ```
 
 期望（工具不会打印 `mismatch 0` 这种字符串，别按那个判）：
@@ -100,7 +104,7 @@ python3 scripts/find_ple_shard.py --strata strata/Strata-0.2.12 \
 
 # ⚠️ 必须用 Strata 的 venv python：系统 python3.14 缺 regex
 strata/venv/bin/python strata/Strata-0.2.12/tools/iq_pack.py \
-  --gguf /path/to/...-00001-of-00004.gguf \
+  --gguf /path/to/<abl>/...-00001-of-00004.gguf \   # 必须是打过补丁的那份；它会按同目录自动发现其余分片
   --out  /path/to/Strata-data/packs/unsloth-ud-q4kxl-ablit \
   --compat-bf16
 ```
@@ -114,7 +118,7 @@ strata/venv/bin/python strata/Strata-0.2.12/tools/iq_pack.py \
 
 ```bash
 PACK=/path/to/Strata-data/packs/unsloth-ud-q4kxl-ablit/tokenizer
-cp "$PACK/chat_template.jinja" "$PACK/chat_template.jinja.orig"      # 原装 9,004 B
+cp "$PACK/chat_template.jinja" "$PACK/chat_template.jinja.orig"      # 原装 9,993 B
 cp patches/froggeric_v22.5.jinja "$PACK/chat_template.jinja"
 wc -c "$PACK/chat_template.jinja"                                    # 28234 字节（28,226 字符）
 ```
@@ -136,7 +140,7 @@ v5.9 起不再套 DavidAU 的 29 段模式合并模板（249,545 B）；`/props.
 ```
 
 共 **30 项**（v5.8 的 32 项去掉 `--resident-budget-gib 56`，专家全驻 RAM）；config 的 `env` 加
-`"STRATA_ROUTE_TAIL_SKIP": "0"`。完整 args 见 `strata/run_strata_q4kxl.sh`。
+`"STRATA_ROUTE_TAIL_SKIP": "0"`。完整 args 在 `strata/strata-unsloth-q4kxl-ablit.json` 的 `args` 数组（`run_strata_q4kxl.sh` 只是 exec 它）。
 
 ```bash
 # ⛔ 必须在你自己的终端里跑（或一次性 systemd 用户单元）。
@@ -144,7 +148,7 @@ v5.9 起不再套 DavidAU 的 29 段模式合并模板（249,545 B）；`/props.
 #    dsh-web 重启时被整组 SIGTERM；症状是日志只有 stopping、没有 traceback。
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 
-# 就绪判据：日志行 ready:（热启 53 秒；首次冷启 106 秒）
+# 就绪判据：日志行 ready:（页缓存命中 53 秒；冷 106 秒）
 #   ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions,
 #                                     Anthropic: /v1/messages, context 262144 tokens)
 curl -s 127.0.0.1:8000/health

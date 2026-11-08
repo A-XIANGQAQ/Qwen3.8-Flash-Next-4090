@@ -19,8 +19,8 @@ v5.3 时期（2026-10-25）用 **vLLM 官方 benchmark** 重测了 prefill / dec
 | prefill 6.2K | 5,177 t/s | 2,752 t/s |
 | prefill 12.8K | 5,526 t/s | 4,479 t/s |
 | 4 并发聚合 | 207.9 / 214.8 / 214.8 t/s | **186.2 / 184.2 / 188.4 t/s** |
-| 单流 decode | 158–164 t/s | 112.8（default）/ **133–135**（low） |
-| 破限探针 | 8/8 不拒答 | **8/8 不拒答** |
+| 单流 decode | 158–164 t/s（0.1.57；0.1.58 未重测） | 112.8（default）/ **133–135**（low） |
+| 破限探针 | 8/8 不拒答 | **8/8 不拒答**（6 条对抗 6/6 + 2 条正常对照） |
 
 模型大 33%，专家槽 17,283 → 10,902；单流下滑基本等于多搬的专家字节，4 并发只掉 13%。
 质量侧：WorkBuddy 两道原失败题 0.1666→**0.8917**、0.0→**0.6923**。细节见
@@ -107,11 +107,11 @@ tar -xzf /tmp/strata-engine-0.1.58-linux-x86_64-cuda-cuda13.tar.gz -C strata/Str
 cp patches/froggeric_v22.5.jinja \
    <Strata-data>/packs/<pack>/tokenizer/chat_template.jinja
 
-# 3. 启动（必须在你自己的终端里跑；冷启约 106 秒、热启约 53 秒）
+# 3. 启动（必须在你自己的终端里跑；页缓存冷 106 秒、命中 53 秒）
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 ```
 
-⚠️ **不要跑 `./setup.sh` / `update.sh`**：会重导原装模板（9,004 B）、重写 config（丢手调参数），
+⚠️ **不要跑 `./setup.sh` / `update.sh`**：会重导原装模板（9,993 B）、重写 config（丢手调参数），
 0.1.44+ 还可能因 #2902 删模型分片。升级只换「服务端源码 + 引擎目录」。
 ⚠️ 服务端 / 引擎 / vision 必须同代（0.2.12 ↔ 0.1.58）；从 agent 的 bash 工具里起进程会被 systemd cgroup 连坐。
 

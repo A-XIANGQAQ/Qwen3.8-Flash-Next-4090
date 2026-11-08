@@ -12,7 +12,7 @@
 #    setsid 只脱离终端/会话、脱不出 cgroup；dsh-web 重启时 server/strata/strata-vision 整组被 SIGTERM。
 #    症状：日志只有 stopping (Ctrl+C again...)，没有 traceback / CUDA / OOM。
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
-# 就绪：日志行 ready:（0.1.58 + UD-Q4_K_XL 实测：热启 53 秒、首次冷启 106 秒）
+# 就绪：日志行 ready:（0.1.58 + UD-Q4_K_XL 实测：页缓存命中 53 秒、冷 106 秒）
 #   ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions,
 #                                     Anthropic: /v1/messages, context 262144 tokens)
 ```
@@ -28,7 +28,7 @@ systemd-run --user --unit=strata-prod --collect \
 # systemctl --user stop strata-prod
 ```
 
-⚠️ **不要用 `./setup.sh` 起服务**：它会重导 unsloth 原装模板（9,004 字节）、重写 config；
+⚠️ **不要用 `./setup.sh` 起服务**：它会重导 unsloth 原装模板（9,993 字节）、重写 config；
 当前用 froggeric v22.5（28,234 字节），靠启动器保证不被覆盖（见 [TROUBLESHOOTING #49](TROUBLESHOOTING.md)）。
 ⚠️ **起之前显存必须已空**（`nvidia-smi` used <1000 MiB），否则 `cudaMalloc` OOM（[#29](TROUBLESHOOTING.md)）。
 

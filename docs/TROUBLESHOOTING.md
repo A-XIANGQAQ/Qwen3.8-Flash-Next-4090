@@ -219,7 +219,7 @@ v3.1 的 UD-Q4_K_XL 是 **`-00004-of-00004`**（IQ4_NL，28.8 GB，`shape [160, 
 .venv/bin/python tools/iq_pack.py --gguf <shard1> --out <pack> --compat-bf16
 ```
 
-- **必须等两片都下完**（缺片直接报错，不会悄悄跳过）。
+- **必须等四片都下完**（v3.1 是 `-0000N-of-00004`；缺片直接报错，不会悄悄跳过）。
 - **必须用 `Strata/.venv/bin/python`**：`iq_pack.py` 末尾用 `sys.executable` 调 `strata_tokenizer.py`，
   系统 python 3.14 没有 `regex` 会直接失败；而 `native_experts.txt` 是最后写的完成标记 ⇒ 其余文件都在、
   看起来只差一个，实际 pack 不可用。
@@ -311,7 +311,7 @@ systemd-run --user --unit=strata-prod --collect \
 
 ```bash
 wc -c <pack>/tokenizer/chat_template.jinja
-#   生产 v5.9：28234（froggeric v22.5） | unsloth 原装：9004
+#   生产 v5.9：28234（froggeric v22.5） | unsloth 原装（GGUF 打包）：9993
 #   复现 v5.8 才用：v3 合并模板 249545 | v2 248855 | v1 246686 | DavidAU 原装 226745
 curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["chat_template"]))'
 #   生产 v5.9：28226 | v5.8：243742

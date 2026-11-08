@@ -43,7 +43,7 @@
   再用 huihui-ai v2 的 `patch-all` 消融 96 个 `ssm_out` / `attn_output` / `ffn_down_shexp` 张量（不动 routed experts），pack 用 `iq_pack.py` 现建 v4，
   模板换回 froggeric v22.5。质量明显上行，代价是 33% 的权重体积：4 并发 215→186 t/s；单流 158–164→**112.8 t/s（default）**、133–135 t/s（`reasoning_effort=low`）。见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)。
 - **遗留**：`#3952`（sm_89 + 262144 ctx + `--spec 4` 的 VRAM 崩塌报告）仍 open；我们靠 `--vram-reserve-mib 2560` + `--kv-resident 32768` 维持 ~2,480 MiB 余量。
-  `PLE table mlock failed` 仍在：`LimitMEMLOCK` 只有 8 MiB，且 `user@1000.service` 自身硬上限就是 8 MiB，transient 单元抬不上去；要锁 PLE 表得 root 加 `user@.service.d/` drop-in（上游称最多 +6% decode）。
+  `PLE table mlock failed` 仍在（`user@1000` 的 `LimitMEMLOCK` 硬上限 8 MiB，要 root drop-in），细节见 [STRATA-MODEL-2026-11-08.md §11](STRATA-MODEL-2026-11-08.md)。
 - **没做严格的交错 A/B**：每代引擎各需一次重启，生产中断代价大于 5% 量级的收益；现有数字只能说明"没有可见回退"。
 
 ## 已删除的东西
@@ -52,5 +52,5 @@
   [`archive/patches/`](../archive/patches/)，旧脚本在 [`archive/scripts/`](../archive/scripts/)。
 - v5.1 的旧 3 片版 UD-Q4_K_XL（111.33 GB，49.86/49.38/12.09 GB 切分）与 NVFP4（126 GiB）权重已删；
   现行 v5.9 用的是 2026-11-04 重切的 v3.1 四片版（总量同为 111.33 GB，边界不同），两者不是同一批文件。
-- **2026-11-08 第二轮删除（用户要求，物理删除、无归档）**：DavidAU IQ3_S（79 GB）及其 pack/旧 mmproj、vLLM 源码 + conda env + `~/.cache/vllm`、
+- **2026-11-08 第二轮删除（用户要求，物理删除、无归档）**：DavidAU IQ3_S（83.86 GB，78.1 GiB）及其 pack/旧 mmproj、vLLM 源码 + conda env + `~/.cache/vllm`、
   `LLM_MODEL` 里的 NVFP4 / FP8 权重、Strata 0.2.2–0.2.11 旧树与旧 config/启动脚本全部删掉，共腾出 289 GB。现在只剩 0.2.12 + UD-Q4_K_XL 一条路线。

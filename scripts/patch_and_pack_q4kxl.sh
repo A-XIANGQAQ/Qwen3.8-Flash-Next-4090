@@ -29,8 +29,8 @@ for f in "$n1" "$n2" "$n3" "$n4"; do [ -s "$SRC/$f" ] || { echo "missing $SRC/$f
 [ -s "$PATCH/Huihui-Qwen3.8-Flash-Next-abliterated-patch-all.gguf" ] || { echo "missing patch gguf"; exit 1; }
 [ -s "$PATCH/Huihui-Qwen3.8-Flash-Next-abliterated-patch-all.gguf.key" ] || { echo "missing patch key"; exit 1; }
 
-ln -f "$SRC/$n1" "$ABL/$n1"
-ln -f "$SRC/$n4" "$ABL/$n4"
+ln -sfn "$SRC/$n1" "$ABL/$n1"
+ln -sfn "$SRC/$n4" "$ABL/$n4"
 ln -sf "$SRC/$n2" "$WORK"/pin2/$n2
 ln -sf "$SRC/$n3" "$WORK"/pin3/$n3
 

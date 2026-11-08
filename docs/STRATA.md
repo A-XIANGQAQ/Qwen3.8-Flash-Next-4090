@@ -44,7 +44,7 @@ conversation cache、KV 流式与 MTP 投机解码。
 0.2.0 起上游发 **Linux 预编译引擎**（0.1.58 的 `BUILD.json`: `archs [75,86,89,120]`, CUDA 13.0），
 不再需要自建；但**不跑 `setup.sh`**：
 
-- setup 会从 GGUF 重导 unsloth 原装模板（9,004 B）→ 覆盖 froggeric
+- setup 会从 GGUF 重导 unsloth 原装模板（9,993 B）→ 覆盖 froggeric
 - `carry_over()` 会重写 run config，**手工加进 `args` 的 12 个参数不会合并**
 - 0.1.44+ 的分片 SHA 校验有 #2902（大分片误判并删文件）
 
@@ -116,7 +116,7 @@ conversation cache、KV 流式与 MTP 投机解码。
 ## 9. 模板
 
 生产装的是 **froggeric v22.5 原版**（28,234 B / 28,226 字符）：effort 别名、think 标记、工具调用与截断修复，
-`reasoning_effort` 由请求头控制。`setup.sh` 每次会把 unsloth 原装模板（9,004 B）写回去；改完模板要重启。
+`reasoning_effort` 由请求头控制。`setup.sh` 每次会把 unsloth 原装模板（9,993 B）写回去；改完模板要重启。
 DavidAU 的 29 段模式合并模板（249,545 B）只用于复现 v5.3–v5.8，见 [TEMPLATE.md](TEMPLATE.md)。
 
 ## 10. 运维与健康判据
@@ -127,7 +127,7 @@ DavidAU 的 29 段模式合并模板（249,545 B）只用于复现 v5.3–v5.8�
 2. 版本/模板：`/props.build_info == "Strata 0.1.58"`，`chat_template` 长度 **28226**
 3. 端到端：一条中文请求正文可读；`/metrics` 的 `live.state` 回到 `idle`
 
-破限判据：来自 huihui v2 消融（96 张量），**不该**出现 ESP 控制向量行；8 条强探针 8/8 不拒答。
+破限判据：来自 huihui v2 消融（96 张量），**不该**出现 ESP 控制向量行；8 条探针（6 对抗 + 2 对照）8/8 不拒答。
 
 ## 11. 已验证 / 未验证
 

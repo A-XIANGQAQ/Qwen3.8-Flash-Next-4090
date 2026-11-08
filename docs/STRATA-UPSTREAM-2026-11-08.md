@@ -121,7 +121,7 @@ commit [`7fb48d7`](https://huggingface.co/Qwen/Qwen3.8-Flash-Next-FP8/commit/7fb
 
 对照我们的模板：
 
-- 官方 `generation_config.json` 的采样默认仍是 `temperature 1.0 / top_k 20 / top_p 0.95`；`chat_template.jinja` 9,004 B。
+- 官方 `generation_config.json` 的采样默认仍是 `temperature 1.0 / top_k 20 / top_p 0.95`；`chat_template.jinja` 9,004 B（官方 Qwen 仓库口径；unsloth GGUF 里打包的是 9,993 B）。
 - 我们的合并模板 243,742 chars 里，`xhigh`/`low` 的两段指令文本与官方**逐字一致**（`Reasoning effort is set to xhigh. Please think carefully through the task, …` / `…low. Keep your thinking brief and focused, …`），同样使用 `<think>` / `</think>`、`enable_thinking`、`reasoning_effort`。
 - 差别在 DavidAU 的 27+27 模式体、8 个 xhigh 组合、自动选模式 v3 —— 这些官方模板没有，也不需要。
 
