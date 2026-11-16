@@ -104,11 +104,11 @@ echo "== build pack $(date +%T)"
   2>&1 | tee "$WORK"/iqpack.log | tail -8
 
 [ -s "$PACK_OUT/native_experts.txt" ] || { echo "FAIL pack 缺 native_experts.txt（iq_pack 未完成）"; exit 1; }
-echo "== template（unsloth 基线用回 froggeric v22.5，不套 DavidAU 的模式体）"
-cp -f "$REPO/patches/froggeric_v22.5.jinja" \
+echo "== template（Sharp-naze v1.5，2026-11-09 起的生产模板；不套 DavidAU 的模式体）"
+cp -f "$REPO/patches/sharp-naze_v1.5.jinja" \
       "$PACK_OUT/tokenizer/chat_template.jinja"
 TS=$(wc -c < "$PACK_OUT/tokenizer/chat_template.jinja")
-[ "$TS" = 28234 ] || { echo "FAIL 模板 $TS B（期望 28234）"; exit 1; }
+[ "$TS" = 34422 ] || { echo "FAIL 模板 $TS B（期望 34422）"; exit 1; }
 echo "template = $TS B"
 head -3 "$PACK_OUT/native_experts.txt"
 ls -l "$PACK_OUT"

@@ -1,12 +1,13 @@
 # 补丁索引
 
-**v5.9 起生产模板是 `froggeric_v22.5.jinja`（纯 froggeric，28,234 B / 28,226 字符）。**
+**2026-11-09 起生产模板是 `sharp-naze_v1.5.jinja`（34,422 B / 34,386 字符）；v5.9 前期用 `froggeric_v22.5.jinja`（28,234 B / 28,226 字符）。**
 `08` 系列是 v5.3–v5.8（DavidAU IQ3_S）的合并模板 + 自动选模式，已退役、仅供历史复现。
 补丁只改模板/配置层，**服务端代码一行没改**。
 
 | 文件 | 用途 |
 |---|---|
-| `froggeric_v22.5.jinja` | **当前生产模板**（28,234 B / 28,226 字符）：上游 froggeric v22.5 原版，未改一字 |
+| `sharp-naze_v1.5.jinja` | **当前生产模板**（34,422 B / 34,386 字符）：HF `nazeshinjite/Flash-Next-Chat-Templates` v1.5-sharp，未改一字（md5 `c127fd72…`） |
+| `froggeric_v22.5.jinja` | 上一代模板（28,234 B / 28,226 字符）：上游 froggeric v22.5 原版，线上备份名 `chat_template.jinja.bak-20261109-froggeric225` |
 | `08_qwen38_froggeric_v225_with_dau_modes.jinja` | 退役（v5.3–v5.8 生产，249,545 B）：froggeric v22.5 + 29 段模式正文 + 8 个 xhigh 组合键 + 自动选模式 v3 |
 | `08_merge_template.py` | 生成器；`MODE_LEX` 是自动选择的词表 |
 | `08_qwen38_froggeric_v225_with_dau_modes.lexicon.json` | 词表快照，供评测工具读 |

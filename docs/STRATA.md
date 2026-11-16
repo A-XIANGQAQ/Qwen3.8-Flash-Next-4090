@@ -4,7 +4,7 @@
 一个自带 C++/CUDA 引擎，复用 llama.cpp 的 ggml/gguf-py/mtmd，做 MoE 专家分层（VRAM/RAM/SSD）、
 conversation cache、KV 流式与 MTP 投机解码。
 
-**当前固定身份**：Strata **0.2.12** 服务端 + **engine 0.1.58**（预编译，arch 含 sm_89）+ unsloth **UD-Q4_K_XL**（huihui v2 消融）。
+**当前固定身份**：Strata **0.2.14** 服务端 + **engine 0.1.60**（预编译，arch 含 sm_89）+ unsloth **UD-Q4_K_XL**（huihui v2 消融**档 1**）+ **Sharp-naze v1.5** 模板。
 版本演进见 [HISTORY.md](HISTORY.md)，实测见 [BENCHMARK.md](BENCHMARK.md)，换模型见
 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)，升级判断见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md)。
 
@@ -32,7 +32,7 @@ conversation cache、KV 流式与 MTP 投机解码。
 |---|---|
 | 量化 | **UD-Q4_K_XL**（4-bit，约 4.3 bpw 有效精度），**111.33 GB / 4 shards** |
 | 破限 | **huihui v2 消融**：`ssm_out` / `attn_output` 共 48 张量（档 1），**不动 routed experts**；不需要 ESP 控制向量 |
-| 模板 | **froggeric v22.5**（28,234 B / 28,226 字符），见 §9 |
+| 模板 | **Sharp-naze v1.5**（34,422 B / 34,386 字符，2026-11-09 起），见 §9 |
 | 视觉 | `mmproj-Qwen3.8-Flash-Next-BF16-unsloth.gguf`（907,542,944 B）+ `engine/strata-vision` |
 | PLE 表 | `per_layer_token_embd.weight` 是 **shard4**（IQ4_NL，28.8 GB），由 `--ple-gguf` 指向它 |
 
@@ -41,14 +41,14 @@ conversation cache、KV 流式与 MTP 投机解码。
 
 ## 3. 获取与版本配对
 
-0.2.0 起上游发 **Linux 预编译引擎**（0.1.58 的 `BUILD.json`: `archs [75,86,89,120]`, CUDA 13.0），
+0.2.0 起上游发 **Linux 预编译引擎**（0.1.60 的 `BUILD.json`: `archs [75,86,89,120]`, CUDA 13.0），
 不再需要自建；但**不跑 `setup.sh`**：
 
-- setup 会从 GGUF 重导 unsloth 原装模板（9,993 B）→ 覆盖 froggeric
+- setup 会从 GGUF 重导 unsloth 原装模板（9,993 B）→ 覆盖当前模板
 - `carry_over()` 会重写 run config，**手工加进 `args` 的 12 个参数不会合并**
 - 0.1.44+ 的分片 SHA 校验有 #2902（大分片误判并删文件）
 
-**必须整代配对**：`serve/server.py`（0.2.12）+ `engine/strata` + `engine/strata-vision`（0.1.58）同代。
+**必须整代配对**：`serve/server.py`（0.2.14）+ `engine/strata` + `engine/strata-vision`（0.1.60）同代。
 只换其中一个不报错，但会静默降级（[TROUBLESHOOTING #39](TROUBLESHOOTING.md)）。
 
 ## 4. 关键参数
@@ -115,7 +115,7 @@ conversation cache、KV 流式与 MTP 投机解码。
 
 ## 9. 模板
 
-生产装的是 **froggeric v22.5 原版**（28,234 B / 28,226 字符）：effort 别名、think 标记、工具调用与截断修复，
+生产装的是 **Sharp-naze v1.5**（34,422 B / 34,386 字符，2026-11-09 起）：effort 别名、think 标记、工具调用与截断修复；froggeric v22.5 备份在包内 `chat_template.jinja.bak-20261109-froggeric225`，
 `reasoning_effort` 由请求头控制。`setup.sh` 每次会把 unsloth 原装模板（9,993 B）写回去；改完模板要重启。
 DavidAU 的 29 段模式合并模板（249,545 B）只用于复现 v5.3–v5.8，见 [TEMPLATE.md](TEMPLATE.md)。
 
@@ -124,21 +124,21 @@ DavidAU 的 29 段模式合并模板（249,545 B）只用于复现 v5.3–v5.8�
 启动/停止/升级：[OPERATIONS.md](OPERATIONS.md)。三层判据缺一不可：
 
 1. 进程：`pgrep -x strata` + `:8000` 在听
-2. 版本/模板：`/props.build_info == "Strata 0.1.58"`，`chat_template` 长度 **28226**
+2. 版本/模板：`/props.build_info == "Strata 0.1.60"`，`chat_template` 长度 **34386**
 3. 端到端：一条中文请求正文可读；`/metrics` 的 `live.state` 回到 `idle`
 
 破限判据：来自 huihui v2 消融（48 张量，档 1），**不该**出现 ESP 控制向量行；8 条探针（6 对抗 + 2 对照）8/8 不拒答。
 
 ## 11. 已验证 / 未验证
 
-**已在 v5.9（0.2.12 + 0.1.58 + UD-Q4_K_XL）上验证**：
+**已在 v6.0（0.2.14 + 0.1.60 + UD-Q4_K_XL）上验证**：
 
 - **历史口径**（2026-10-25，IQ3_S + 0.1.47，vLLM 基准，不代表 v5.9）：1K / 8K / 32K / 64K / 128K / 260K prefill 与 1K / 32K / 128K / 260K decode，2–4 路并发；见 [BENCHMARK.md](BENCHMARK.md) §1–§9
 - v5.9 实际复测范围：6.25K / 12.7K prompt、4 路 512-token 并发、单流 default/low（见下条）
 - 4×256K 配置与 KV 流式；`k8v4`；`--batch-mtp` 并发
 - 视觉三色条 3/3（0.1.45 时代，样本小）；专家缓存 **32,595 MiB / 10,902 槽**；arena **73,450 MiB**（专家全驻 RAM）；启动后空闲显存 2,517 MiB
-- **0.2.9 的 11 个新默认环境变量逐个在引擎进程里确认生效**（9 并行 + 2 GDN），0.2.12 上仍是同一组；`drafting = mtp`；**验收 31/31**；换模型后 6.25K prompt 2,752 t/s、12.7K 4,479 t/s、4 并发聚合 186–188 t/s（2026-11-08，同协议对照 IQ3_S）
-- 0.2.11 引入、0.2.12 仍为 **FP16 weight cache 0 MiB**（需分配后留 3,072 MiB 空闲，本机余 ~2,900 MiB），因此上游 4 路 +5.7% 未复现；`pcie_frac` 由 0.55 变为按 CPU 实测的 **0.15**
+- **0.2.9 的 11 个新默认环境变量逐个在引擎进程里确认生效**（9 并行 + 2 GDN），0.2.12 上仍是同一组；0.2.13 起默认值搬进引擎、服务端不再注入；`drafting = mtp`；**v6.0 验收 23/23**；0.1.60 上 6.2K prompt 2,795 t/s、12.8K 4,783 t/s、20K 4,847、30K 4,939 t/s，4 并发 175–187 t/s（与 11-08 的 0.1.58 空缓存 186–188 持平）
+- 0.2.11 引入、0.1.58/0.1.60 仍为 **FP16 weight cache 0 MiB**（需分配后留 3,072 MiB 空闲，本机余 ~2,900 MiB），因此上游 4 路 +5.7% 未复现；`pcie_frac` 由 0.55 变为按 CPU 实测的 **0.15**
 - 0.1.43.1 曾连续跑 2 天 23 小时（被 cgroup 连带杀，不是自崩）
 
 **未验证**：

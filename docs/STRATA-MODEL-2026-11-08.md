@@ -5,6 +5,8 @@
 > （不碰 routed experts），pack 用 0.2.12 的 `iq_pack.py` 现建 v4，模板换回 **froggeric v22.5**。
 > 换来的是质量：WorkBuddy 两道错题 0.17→0.89、0.00→0.69；代价是速度（同协议 4 并发 215→186 t/s）
 > 与两道已高分题的 4–7% 回落；模型与模板同时变，无法单独归因。
+>
+> **2026-11-09 更新**：模板当天换成 **Sharp-naze v1.5**（34,422 B / 34,386 字符，froggeric 留在 `chat_template.jinja.bak-20261109-froggeric225`）；同日 15:52 权重曾短暂切回官方 stock（理由：消融打在量化后权重上，正确顺序是 bf16 消融→量化），随后又切回档 1。当前生产 = 档 1 + Sharp-naze v1.5。
 
 ## 1. 为什么换
 
@@ -21,7 +23,7 @@
   > 文本、只输出思考就 `stop`（前端显示「已完成，13 秒」）。2026-11-08 当晚用档 1 重建后，
   > 连续工具调用恢复正常，验收 31/31、破限探针 8/8。
   > 层范围保持 `--start-layer 0 --end-layer 48`。
-- 模板不再需要 DavidAU 的 29 段模式系统：换回 froggeric v22.5 原版（28,226 字符），
+- 模板不再需要 DavidAU 的 29 段模式系统：换回 froggeric v22.5 原版（28,226 字符；11-09 起又换成 Sharp-naze v1.5 / 34,386），
   它本身通吃 Qwen3.5/3.6/3.8 与 Flash-Next，并支持 `reasoning_effort` 全档位。
 
 ## 2. 资产与校验
@@ -87,10 +89,12 @@
 
 tokenizer：vocab 248,320 / merges 247,587 / eos 248,046 / bos=pad 248,044。
 
-## 5. 模板：froggeric v22.5
+## 5. 模板：Sharp-naze v1.5（2026-11-08 当时是 froggeric v22.5）
 
-安装命令只有一处：[REPRODUCTION.md §6](REPRODUCTION.md)（`cp patches/froggeric_v22.5.jinja <pack>/tokenizer/chat_template.jinja`，
-`wc -c` = 28,234 B、`len()` = 28,226）。不再套 DavidAU 合并模板（249,545 B / 243,742 字符）；验收断言随之改成 **28226**。
+安装命令只有一处：[REPRODUCTION.md §6](REPRODUCTION.md)（`cp patches/sharp-naze_v1.5.jinja <pack>/tokenizer/chat_template.jinja`，
+`wc -c` = 34,422 B、`len()` = 34,386）。不再套 DavidAU 合并模板（249,545 B / 243,742 字符）；验收断言随之改成 **34386**。
+
+历史：11-08 换模型时用的是 froggeric v22.5（28,234 B / 28,226 字符）；11-09 09:27 换成 Sharp-naze v1.5，包内保留 `chat_template.jinja.bak-20261109-froggeric225`。之后各文档里的 28,226 均为这一旧口径。
 
 ## 6. 启动参数：从 32 项减到 30 项
 
@@ -114,9 +118,9 @@ tokenizer：vocab 248,320 / merges 247,587 / eos 248,046 / bos=pad 248,044。
 | 冷启动 | **106 s**（页缓存冷；arena 每次启动都重填，本次 1.68 GiB/s） |
 | 热启动 | **53 s**（页缓存命中，12.49 GiB/s；PLE 加载 14.4 s → 0.1 s） |
 | 切到档 1（16:55） | 停机 9 s、**65 s 就绪**（页缓存半热） |
-| 验收 | **31/31 PASS**（`scripts/accept_q4kxl.sh`） |
+| 验收 | **31/31 PASS**（`scripts/accept_q4kxl.sh`，11-08 口径；当前 v6.0 用 `accept_q4kxl_0214.sh`，23/23） |
 | `/health` | `model=qwen3.8-flash-next-q4kxl-ablit-l1`、`max_context=262144`、`images=true` |
-| `/props` | `build_info "Strata 0.1.58"`、`len(chat_template) = 28226` |
+| `/props` | `build_info "Strata 0.1.58"`、`len(chat_template) = 28226`（11-08 口径；11-09 起模板换 Sharp-naze，现为 34386） |
 
 验收首跑 4 个 FAIL 全是测试脚本自身解析 bug（`/metrics` 是 `{"engine":{…}}` 双层，`jget()` 取错层）；
 修正解析后 28/28（脚本后来加了 model、expert_slots、pcie_frac 断言与更严的 PLE/MTP 检查，现为 31 项），不是服务端问题。

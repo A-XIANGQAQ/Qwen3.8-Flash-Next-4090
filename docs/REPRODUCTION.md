@@ -1,6 +1,6 @@
 # 完整复现 (Full Reproduction)
 
-从一台干净的 Linux 机器复现 **v5.9：Strata 0.2.12 服务端 + engine 0.1.58 + unsloth UD-Q4_K_XL（huihui v2 破限）**。
+从一台干净的 Linux 机器复现 **v6.0：Strata 0.2.14 服务端 + engine 0.1.60 + unsloth UD-Q4_K_XL（huihui v2 破限档 1）+ Sharp-naze v1.5 模板**。
 只有这一条路线；v1–v4 的运行时已删除，历史见 [HISTORY.md](HISTORY.md)。
 
 ## 1. 硬件要求
@@ -20,33 +20,33 @@
 
 ## 3. 服务端与引擎
 
-0.2.0 起上游发 **Linux 预编译引擎**（0.1.58 的 `BUILD.json` arch 含 `75/86/89/120`，vision 同）。**不要跑 `setup.sh`**：
+0.2.0 起上游发 **Linux 预编译引擎**（0.1.60 的 `BUILD.json` arch 含 `75/86/89/120`，vision 同）。**不要跑 `setup.sh`**：
 它会重导模板、重写 run config，0.1.44+ 还可能因 #2902 删模型分片。
 
 ```bash
 export https_proxy=http://127.0.0.1:7890        # 本机访问 GitHub 需要
 
-# 服务端源码（tag v0.2.12，不需要编译）
-mkdir -p strata/Strata-0.2.12
-curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.12.tar.gz \
-  | tar -xz -C strata/Strata-0.2.12 --strip-components=1
+# 服务端源码（tag v0.2.14，不需要编译）
+mkdir -p strata/Strata-0.2.14
+curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.14.tar.gz \
+  | tar -xz -C strata/Strata-0.2.14 --strip-components=1
 
 # 预编译引擎（CUDA 13；sha256 必须与签名 feed 一致）
-gh release download v0.2.12 --repo Niko1221/Strata \
-  -p 'strata-engine-0.1.58-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
-sha256sum /tmp/strata-engine-0.1.58-linux-x86_64-cuda-cuda13.tar.gz
+gh release download v0.2.14 --repo Niko1221/Strata \
+  -p 'strata-engine-0.1.60-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
+sha256sum /tmp/strata-engine-0.1.60-linux-x86_64-cuda-cuda13.tar.gz
 #   bbbfa8260125b94591cae30747cb0e4a9cee26d9cb0b2e284e33000c91509d54
-mkdir -p strata/Strata-0.2.12/engine
-tar -xzf /tmp/strata-engine-0.1.58-linux-x86_64-cuda-cuda13.tar.gz \
-  -C strata/Strata-0.2.12/engine
-strata/Strata-0.2.12/engine/strata --version       # 期望：strata 0.1.58
+mkdir -p strata/Strata-0.2.14/engine
+tar -xzf /tmp/strata-engine-0.1.60-linux-x86_64-cuda-cuda13.tar.gz \
+  -C strata/Strata-0.2.14/engine
+strata/Strata-0.2.14/engine/strata --version       # 期望：strata 0.1.60
 ```
 
 引擎包自带 cuBLAS/cuDART（rpath），**不需要** `LD_LIBRARY_PATH`。Python 依赖：
 
 ```bash
 python3.12 -m venv strata/venv                  # 路径可自定；下文统一用这个
-strata/venv/bin/pip install -r strata/Strata-0.2.12/requirements.txt
+strata/venv/bin/pip install -r strata/Strata-0.2.14/requirements.txt
 
 # 打补丁与 iq_pack 都要 import gguf：用任意 llama.cpp checkout 的 gguf-py
 git clone --depth 1 https://github.com/ggml-org/llama.cpp /tmp/llama.cpp
@@ -54,12 +54,12 @@ export STRATA_GGUF_PY=/tmp/llama.cpp/gguf-py    # 仓库脚本与 iq_pack 都认
 
 # expert-profile.bin：生产 config 默认指向 strata/Strata/data/expert-profile.bin
 mkdir -p strata/Strata/data
-curl -L https://raw.githubusercontent.com/Niko1221/Strata/v0.2.12/data/expert-profile.bin \
+curl -L https://raw.githubusercontent.com/Niko1221/Strata/v0.2.14/data/expert-profile.bin \
   -o strata/Strata/data/expert-profile.bin      # 196,632 B；也可改 config 的 --expert-profile
 ```
 
 `strata/Strata/` 不是安装目录，只是沿用本机的路径布局（装 venv、data/、旧 gguf-py 的地方）；
-`strata/Strata-0.2.12/` 才是服务端源码树。
+`strata/Strata-0.2.14/` 才是服务端源码树。
 
 ## 4. 模型（unsloth UD-Q4_K_XL，4 shards；Dynamic v3.0）
 
@@ -119,12 +119,12 @@ pack 是「GGUF 权重 + tokenizer + 专家 profile」的布局，由 Strata 自
 
 ```bash
 # PLE 表在 shard4（UD-Q4_K_XL 现行布局）
-strata/venv/bin/python scripts/find_ple_shard.py --strata strata/Strata-0.2.12   # 需 STRATA_GGUF_PY \
+strata/venv/bin/python scripts/find_ple_shard.py --strata strata/Strata-0.2.14   # 需 STRATA_GGUF_PY \
   /path/to/...-00001-of-00004.gguf /path/to/...-00002-of-00004.gguf \
   /path/to/...-00003-of-00004.gguf /path/to/...-00004-of-00004.gguf
 
 # ⚠️ 必须用 Strata 的 venv python：系统 python3.14 缺 regex
-strata/venv/bin/python strata/Strata-0.2.12/tools/iq_pack.py \
+strata/venv/bin/python strata/Strata-0.2.14/tools/iq_pack.py \
   --gguf /path/to/<abl>/...-00001-of-00004.gguf \   # 必须是打过补丁的那份；它会按同目录自动发现其余分片
   --out  /path/to/Strata-data/packs/unsloth-ud-q4kxl-ablit-l1 \
   --compat-bf16
@@ -143,7 +143,7 @@ strata/venv/bin/python strata/Strata-0.2.12/tools/iq_pack.py \
 `STRATA_MTP_REVISION` 可覆盖默认 pin）。MTP 头**不随量化/消融变化**，所以与 IQ3_S 时代那份是同一来源。
 
 ```bash
-T=strata/Strata-0.2.12/tools
+T=strata/Strata-0.2.14/tools
 strata/venv/bin/python $T/mtp_fetch.py inventory --out strata/mtp-bf16   # 只读各分片 header（几 KB/片）
 strata/venv/bin/python $T/mtp_fetch.py fetch     --out strata/mtp-bf16   # 可续传；只取 mtp.* 的字节区间
 strata/venv/bin/python $T/mtp_fetch.py verify    --out strata/mtp-bf16   # exit 3 = 有张量缺失/损坏
@@ -156,16 +156,16 @@ strata/venv/bin/python $T/mtp_rt.py --gguf strata/mtp-bf16/mtp-q2_0.gguf \
 产物：`dense.bin` 116,099,072 B、`experts.bin` 707,788,800 B、`draft_vocab.bin` 425,196 B、`dense.txt`。
 `--mtp` 指向这个目录；没有它服务起不来（`--batch-mtp` 会把草稿层加载行写进日志，验收第 9 节检查）。
 
-## 6. 模板（froggeric v22.5）
+## 6. 模板（Sharp-naze v1.5）
 
 ```bash
 PACK=/path/to/Strata-data/packs/unsloth-ud-q4kxl-ablit-l1/tokenizer
 cp "$PACK/chat_template.jinja" "$PACK/chat_template.jinja.orig"      # 原装 9,993 B
-cp patches/froggeric_v22.5.jinja "$PACK/chat_template.jinja"
-wc -c "$PACK/chat_template.jinja"                                    # 28234 字节（28,226 字符）
+cp patches/sharp-naze_v1.5.jinja "$PACK/chat_template.jinja"
+wc -c "$PACK/chat_template.jinja"                                    # 34422 字节（34,386 字符）
 ```
 
-v5.9 起不再套 DavidAU 的 29 段模式合并模板（249,545 B）；`/props.chat_template` 的 `len()` 是 **28226**。
+v5.9 起不再套 DavidAU 的 29 段模式合并模板（249,545 B）；2026-11-09 起生产模板是 Sharp-naze v1.5，`/props.chat_template` 的 `len()` 是 **34386**（froggeric v22.5 是 28226，留作历史）。
 `setup.sh` 每次都会重导模板，重跑 setup 后要重装一次。
 
 ## 7. 启动
@@ -198,19 +198,19 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 #                                     Anthropic: /v1/messages, context 262144 tokens)
 curl -s 127.0.0.1:8000/health
 curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["build_info"], len(d["chat_template"]))'
-#   期望：Strata 0.1.58 28226
+#   期望：Strata 0.1.60 34386
 ```
 
 ⚠️ 起之前确认显存已空：`nvidia-smi --query-gpu=memory.used --format=csv,noheader` 轮询到 **<1000 MiB**，
 否则 `cudaMalloc` OOM（[TROUBLESHOOTING #29](TROUBLESHOOTING.md)）。
 ⚠️ 不要用 `./setup.sh` 无参起服务——它会自己拉起模型并绕过模板。
 
-## 8. 成功判据（v5.9）
+## 8. 成功判据（v6.0）
 
-验收脚本：`bash scripts/accept_q4kxl.sh`（只读探测，**31 项断言**；本机实测 PASS=31 FAIL=0，失败时 exit 1）。
-覆盖：`/health`（loaded/ctx/images/model）、`/props`（build_info + 模板 28226）、`/metrics.engine`
+验收脚本：`bash scripts/accept_q4kxl_0214.sh`（只读探测，**23 项断言**；本机实测 PASS=23 FAIL=0，失败时 exit 1）。旧脚本 `accept_q4kxl.sh`（31 项）用于 0.2.12 + 0.1.58。
+覆盖：`/health`（loaded/ctx/images/model）、`/props`（build_info + 模板 34386）、`/metrics.engine`
 （engine / drafting / slots / expert_slots / pcie_frac / arena）、一条对话、`reasoning_effort` 通路、视觉、
-11 个并行栈 env、**本次启动**日志里的 PLE/`--ple-gguf`、drafter=MTP。
+4 路并发冒烟、**本次启动**日志里的 PLE/`--ple-gguf`/48 层融合内核、drafter=MTP。并行栈 env 在 0.2.13 起改为引擎内建，脚本只作信息项。
 
 脚本不覆盖、需手工确认：
 
@@ -218,7 +218,7 @@ curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;d=json.load(sys.stdin
 - [ ] 启动后显存约 **46,145 / 49,140 MiB**（脚本只打印 `nvidia-smi`，不断言；跑过长上下文/视觉后到 ~46,570 属缓存增长）
 - [ ] 视觉回答的颜色正确（脚本只断言 `completion_tokens ≥ 1`，不判色）
 - [ ] 破限：`python3 scripts/probe_abliteration.py` → 8/8 不拒答（只记 refused 与长度，不存正文；有异常或拒答时 exit 1）
-- [ ] 0.2.12 服务端 + 0.1.58 引擎是已验证配对（见 [TROUBLESHOOTING #39](TROUBLESHOOTING.md)）
+- [ ] 0.2.14 服务端 + 0.1.60 引擎是已验证配对（见 [TROUBLESHOOTING #39](TROUBLESHOOTING.md)）；0.2.12 + 0.1.58 保留作上一代
 
 ## 不在默认范围
 

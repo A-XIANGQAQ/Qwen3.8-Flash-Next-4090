@@ -1,6 +1,22 @@
-# 基准实测（当前 v5.9；附 v5.3 口径）
+# 基准实测（当前 v6.0；附 v5.9 与 v5.3 口径）
 
-## 0. 换模型后的实测（v5.9，2026-11-08）
+## 0a. 引擎升级实测（v6.0，2026-11-16，0.1.58 → 0.1.60）
+
+同机同协议：`scripts/prefill_bench.py`（每条 prompt 加 24 字符随机前缀破 prefix cache，3 次取 TTFT 中位）+ `strata/concurrent.py --levels 4 --repeats 3 --max-tokens 512`；测前确认 `live.running+queued == 0`。
+
+| 项 | 0.1.58（切前，干净） | 0.1.60（切后） | 差 |
+|---|---:|---:|---:|
+| prefill 6,264 tok | 2,770 t/s（2.245 s） | **2,795 t/s**（2.24 s） | +0.9% |
+| prefill 13,032 tok | 4,631 t/s（2.801 s） | **4,783 t/s**（2.724 s） | **+3.3%** |
+| prefill 20,377 tok | 未测 | **4,847 t/s**（4.204 s） | — |
+| prefill 29,953 tok | 未测 | **4,939 t/s**（6.065 s） | — |
+| 4 路聚合 | 102.4 / 105.5 / 103.2 t/s\* | **175.0 / 187.1 / 185.6 t/s** | 不可直接比 |
+| 每路 decode 中位 | 41.8 / 43.5 / 44.2 t/s\* | 45.4 / 48.8 / 48.6 t/s | — |
+| TTFT | 0.401 / 0.353 / 0.404 s | 0.306 / 0.384 / 0.345 s | 同量级 |
+
+\* 切前那组 conversation cache 里停着外部 140K 会话，每轮都 park/restore（墙钟 19.4–20.0 s）；切后是空缓存（10.95–11.7 s）。对照 11-08 的 0.1.58 **空缓存**口径（186–188 t/s、每路 54.9–57.3），0.1.60 的并发属于持平。prompt 的 +0.9%/+3.3% 是干净信号：0.1.60 把 Q4_K/Q5_K 专家的 prompt 从 llama.cpp MMQ 换到 Strata 自有内核，日志 `prompt kernels: chunks of 1024 tokens or more run 48 of 48 layers on the fused kernels`。
+
+## 0b. 换模型后的实测（v5.9，2026-11-08，0.1.58 口径）
 
 同机同协议（`scripts/prefill_bench.py` 与 `strata/concurrent.py`），对照 v5.8 的 IQ3_S：
 
@@ -19,7 +35,7 @@
 
 # 附：v5.3 口径（2026-10-25，IQ3_S + 0.1.47，vLLM 基准）
 
-以下 §1–§9 全部属于这一口径，不代表 v5.9 的当前数字。
+以下 §1–§9 全部属于这一口径，不代表 v5.9 / v6.0 的当前数字。
 
 > **一句话**：单流 decode **167–177 t/s**（1K→256K 基本平坦），单流 prefill **约 3.9–4.05K t/s**
 > （8K 以上；1K 档 TTFT 0.82 s 里固定开销占大头），**260K 首次实测**：TTFT 66.2 s、decode 168 t/s。
@@ -35,14 +51,14 @@
 | 项 | 值 |
 |---|---|
 | 主机 | 单 RTX 4090 **48GB**（sm_89），38 核 / 76 线程，247GB RAM |
-| 引擎 | Strata **0.2.2** 服务端 + **engine 0.1.47**（2026-10-25 当时版本；当前 v5.9 = 0.2.12 + 0.1.58 + UD-Q4_K_XL） |
+| 引擎 | Strata **0.2.2** 服务端 + **engine 0.1.47**（2026-10-25 当时版本；当前 v6.0 = 0.2.14 + 0.1.60 + UD-Q4_K_XL） |
 | 模型 | DavidAU Qwen3.8-Flash-Next abliterated **IQ3_S**（83.86GB，2 shards，3.4 bpw；v5.3 口径） |
 | 服务地址 | `127.0.0.1:8000`，`/v1/chat/completions` |
 | 并发 / 上下文 | `--batch 4`，`--max-context 262144` |
 | KV | `--kv k8v4 --kv-resident 32768` |
 | 投机 | `--spec 4 --spec-min-p 0.5 --batch-mtp` |
 | prefill / 显存 | `--prefill auto:32768`，`--vram-reserve-mib 2560`，`--vision` |
-| 专家缓存 | **33,603 MiB / 17,283 槽**（`/metrics.engine.expert_cache_mib` / `expert_slots`，0.1.58 实测；0.1.55 是 17,285 槽，0.1.52 是 33,889 MiB / 17,417 槽，0.1.45 是 32.28 GiB / 11054） |
+| 专家缓存 | **33,603 MiB / 17,283 槽**（v5.3 口径 0.1.47 的 32.28 GiB / 11054；0.1.58 是 33,603 MiB / 17,283 槽，0.1.60 + UD-Q4_K_XL 是 **33,038 MiB / 11,049 槽**） |
 | 启动后空闲显存 | 2,231 MiB |
 | 测量窗口 | 2026-10-25 13:31–13:39（服务未重启、未停服），`live.state` 全程 idle，`engine_cache_reused_ratio = 0` |
 

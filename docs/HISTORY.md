@@ -6,7 +6,8 @@
 
 | 版本 | 时间 | 引擎 / 权重 | 一句话结果 | 状态 |
 |---|---|---|---|---|
-| **v5.9** | 2026-11-08 | **Strata 0.2.12 + engine 0.1.58** / **unsloth UD-Q4_K_XL（4-bit）+ huihui-ai v2 消融** | 换模型：WorkBuddy 原失败题 0.1666→**0.8917**、0.0→**0.6923**；速度降（4 并发 215→186 t/s；单流 158–164→**112.8 t/s default**、133–135 t/s effort=low）；48/48 张量消融、pack v4、froggeric v22.5（28,226 字符）、验收 31/31，见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md) | ✅ 当前 |
+| **v6.0** | 2026-11-16 | **Strata 0.2.14 + engine 0.1.60** / **unsloth UD-Q4_K_XL + huihui-ai v2 消融档 1** | Q4_K/Q5_K 专家的 prompt 从 llama.cpp MMQ 换到 Strata 自有融合内核（日志 48/48 层）：6.2K prompt 2,770→**2,795 t/s**、12.8K 4,631→**4,783 t/s**（+3.3%）、20K 4,847、30K 4,939；4 并发 175–187 t/s 与 0.1.58 空缓存口径持平；模板 Sharp-naze v1.5（34,386 字符）、验收 23/23；**停机 7m24s**（启动器漏 `chmod +x`），见 [STRATA-UPSTREAM-2026-11-16.md](STRATA-UPSTREAM-2026-11-16.md) | ✅ 当前 |
+| v5.9 | 2026-11-08 | **Strata 0.2.12 + engine 0.1.58** / **unsloth UD-Q4_K_XL（4-bit）+ huihui-ai v2 消融** | 换模型：WorkBuddy 原失败题 0.1666→**0.8917**、0.0→**0.6923**；速度降（4 并发 215→186 t/s；单流 158–164→**112.8 t/s default**、133–135 t/s effort=low）；48/48 张量消融、pack v4；**11-09 模板换 Sharp-naze v1.5（34,386 字符）、权重同日曾短暂切回 stock 后又回档 1**，见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md) | 被 v6.0 取代 |
 | v5.8 | 2026-11-08 | **Strata 0.2.12 + engine 0.1.58** / DavidAU IQ3_S（3.4 bpw） | **速度持平**（6.25K prompt 5,177 t/s、12.7K 5,526 t/s、4 并发 215 t/s），换的是 7 条工具调用修复（`#4828` 强制 tool_choice 0/24→24/24）+ 引擎 `#5108` 长 CUDA prompt 行表越界；W16 cache 仍 **0 MiB**；停机 48 s，验收 24/24，见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md) | 被 v5.9 取代 |
 | v5.7 | 2026-11-06 | Strata 0.2.11 + engine 0.1.57 / DavidAU IQ3_S | **FP16 weight cache 在 48 GB 上未启用（0 MiB，需留 3 GiB 空闲）**，换的是 4 条修复（#2518 slot 串台、#5040/#4701 流式工具尾段、#4451 重启后旧请求挂新 slot、#4271 断流不再占 slot）；停机 47 s，验收 24/24，见 [STRATA-UPSTREAM-2026-11-06.md](STRATA-UPSTREAM-2026-11-06.md) | 被 v5.8 取代 |
 | v5.6 | 2026-11-03 | Strata 0.2.10 + engine 0.1.56 / DavidAU IQ3_S | 性能零收益、纯修复（DFlash2 与 4 并发互斥）；停机 47 s，验收 23/23，见 [STRATA-UPSTREAM-2026-11-03.md](STRATA-UPSTREAM-2026-11-03.md) | 被 v5.7 取代 |
@@ -21,7 +22,7 @@
 | v2 | 2026-09-14 | Lsglang 0.5.19-lkmoe + PR #37500 | 首次在单 4090 上跑通 Flash-Next | ⛔ 运行时已删 |
 | v1 | — | Lsglang 1.4.13 + lk_moe 2.4.0 | 早期能起服务，长上下文不可用 | ⛔ 运行时已删 |
 
-## 为什么从 v5.3 一路走到 v5.9
+## 为什么从 v5.3 一路走到 v6.0
 
 - **v5.4（0.2.7）**：0.2.3–0.2.6 对 Qwen 单卡无增量（0.2.6 的 Qwen 引擎与 0.2.5 逐字节相同）；0.2.7 是 0.2.2 之后第一个动 sm_89 的版本
   （实测速度表，结果 bit-for-bit 不变）+ `#1503` 会话缓存跨会话、`#3602` 读表挂死等修复。见 [STRATA-UPSTREAM-2026-10-28.md](STRATA-UPSTREAM-2026-10-28.md)。
@@ -40,8 +41,12 @@
   与引擎 `#5108`（行表越界读取会 fault 长 CUDA prompt）、`#5096/#4844`（copy 顺序、丢失的 adaptive swap）。
   同协议实测 6.25K prompt 5,177 t/s、12.7K 5,526 t/s、4 并发 215 t/s，与 0.1.57 差在 ±1% 噪声内；停机 48 s。见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md)。
 - **v5.9（换模型）**：引擎不动，权重从 DavidAU IQ3_S（83.86 GB，3.4 bpw）换成官方 unsloth **UD-Q4_K_XL**（111.33 GB；**Dynamic v3.0**，见 [STRATA-MODEL §2.1](STRATA-MODEL-2026-11-08.md)），
-  再用 huihui-ai v2 的 `patch-all` 消融 48 个 `ssm_out` / `attn_output` 张量（不动 routed experts），pack 用 `iq_pack.py` 现建 v4，
-  模板换回 froggeric v22.5；当晚发现档 2 会破坏工具链（推理当正文、工具调用变文本），重建为档 1（48 张量）并切换。质量明显上行，代价是 33% 的权重体积：4 并发 215→186 t/s；单流 158–164→**112.8 t/s（default）**、133–135 t/s（`reasoning_effort=low`）。见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)。
+  再用 huihui-ai v2 的 `patch-all` 消融 48 个 `ssm_out` / `attn_output` 张量（不动 routed experts），pack 用 `iq_pack.py` 现建 v4；
+  模板先换回 froggeric v22.5，**11-09 又换成 Sharp-naze v1.5**（34,422 B）；当晚发现档 2 会破坏工具链（推理当正文、工具调用变文本），重建为档 1（48 张量）并切换。质量明显上行，代价是 33% 的权重体积：4 并发 215→186 t/s；单流 158–164→**112.8 t/s（default）**、133–135 t/s（`reasoning_effort=low`）。见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)。
+- **v6.0（0.2.14 + 0.1.60）**：唯一实质变化是 **Q4_K/Q5_K 专家的 prompt 从 llama.cpp MMQ 换到 Strata 自有融合内核**（`-DSTRATA_MMQ=ON` 可回旧路径），
+  引擎二进制从 315.7 MB 降到 177.7 MB。日志确认 `48 of 48 layers on the fused kernels`；同协议实测 6.2K prompt +0.9%、12.8K **+3.3%**、20K 4,847 t/s、30K 4,939 t/s，
+  并发与 0.1.58 空缓存口径持平。0.2.13 没有单独升（只是把启动器默认值搬进引擎）。工具调用/思考泄漏 `#4751`/`#4077`/`#4949` **仍未修**。
+  代价是一次 7m24s 停机：新启动器漏了 `chmod +x`，`systemd-run` 报「权限不够」。见 [STRATA-UPSTREAM-2026-11-16.md](STRATA-UPSTREAM-2026-11-16.md)。
 - **遗留**：`#3952`（sm_89 + 262144 ctx + `--spec 4` 的 VRAM 崩塌报告）仍 open；我们靠 `--vram-reserve-mib 2560` + `--kv-resident 32768` 维持 ~2,480 MiB 余量。
   `PLE table mlock failed` 仍在（`user@1000` 的 `LimitMEMLOCK` 硬上限 8 MiB，要 root drop-in），细节见 [STRATA-MODEL-2026-11-08.md §11](STRATA-MODEL-2026-11-08.md)。
 - **没做严格的交错 A/B**：每代引擎各需一次重启，生产中断代价大于 5% 量级的收益；现有数字只能说明"没有可见回退"。

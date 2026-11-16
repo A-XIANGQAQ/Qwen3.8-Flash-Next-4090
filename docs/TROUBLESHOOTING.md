@@ -1,6 +1,6 @@
 # 排障手册 (Troubleshooting)
 
-> 只保留 **v5.9（Strata 0.2.12 + engine 0.1.58 + unsloth UD-Q4_K_XL）** 仍适用的条目。
+> 只保留 **v6.0（Strata 0.2.14 + engine 0.1.60 + unsloth UD-Q4_K_XL 档 1 + Sharp-naze v1.5）** 仍适用的条目。
 > v1–v4 的坑（编号 1–10、13–17、19–28）已随运行时删除，需要时看 git 历史。
 > 严重度：🔴 会停服 / 🟡 性能或质量受损 / 🔵 认知陷阱 / 🟢 测量与操作习惯。
 
@@ -65,7 +65,7 @@ v5.3 复测（0.1.47 + DavidAU）4 路聚合约 **202 t/s**，见 [BENCHMARK](BE
 ## 🔵 32. `setup.sh` 每次都会覆盖 chat 模板
 
 Strata 每次 `setup` 都从 GGUF **重新解出** `<pack>/tokenizer/chat_template.jinja`，手工替换必被覆盖。
-后果不是报错而是**静默换模板**：同一 prompt 渲染 **2378（原装） vs 2336（froggeric）** token，
+后果不是报错而是**静默换模板**：同一 prompt 渲染 **2378（unsloth 原装 9,993 B） vs 2336（froggeric v22.5）** token（2026-11-09 之前的模板口径；现在是 Sharp-naze v1.5），
 且**默认思考档随之改变**（见 #33）。
 
 **修复**：把"应用模板"挂在**启动器**上（幂等、fail-open），并且**不要用 `./setup.sh` 无参起服务**——
@@ -73,8 +73,8 @@ Strata 每次 `setup` 都从 GGUF **重新解出** `<pack>/tokenizer/chat_templa
 
 ## 🔵 33. 默认思考档由 chat 模板决定，不是引擎
 
-上游文档说"默认 high"，那说的是**原装模板**的行为。本站用 froggeric v22.5，第 17 行写死
-`_default_reasoning_effort = 'medium'` ⇒ 实测"不指定"与显式 `medium` 的思考长度**逐字吻合**（273 字符），
+上游文档说"默认 high"，那说的是**原装模板**的行为。本站 11-09 之前用 froggeric v22.5，第 17 行写死
+`_default_reasoning_effort = 'medium'`；现在用 Sharp-naze v1.5，默认档仍是 `medium` ⇒ 实测"不指定"与显式 `medium` 的思考长度**逐字吻合**（273 字符），
 `high` 是 451。**⇒ 换到 Strata 后默认档没有变。**
 
 另：`/v1/models` advertise 的枚举会**少于**实际支持——启动日志里是
@@ -151,7 +151,7 @@ CUDA error: out of memory
   静默降级——旧 server 会按「引擎太老/太新」处理，不报错，只少给功能。
 - 判据：`engine/BUILD.json` 的 `version`、`engine/strata --version`、`/props` 的 `build_info`、
   `serve/server.py` 里 `PARALLEL_MAX`、`setup.py` 里 `MIN_ENGINE` 应当指向同一代。
-  本站当前已知可用配对：**服务端 0.2.12 + 引擎 0.1.58**（`/props.build_info = "Strata 0.1.58"`）；0.2.11 + 0.1.57 曾验证可用，但旧树已在 2026-11-08 删除，回退需重下。
+  本站当前已知可用配对：**服务端 0.2.14 + 引擎 0.1.60**（`/props.build_info = "Strata 0.1.60"`）；0.2.12 + 0.1.58 保留作上一代回滚，更早的旧树已删除、回退需重下。
 - 修法：整套换。见 [OPERATIONS.md](OPERATIONS.md) §1c。
 
 ## 🔴 40. 别让 `update.sh` / `setup.py` 碰你的模型分片
@@ -231,7 +231,7 @@ UD-Q4_K_XL 的 PLE 表在 **`-00004-of-00004`**（IQ4_NL，28.8 GB，`shape [160
 
 ## 🔴 45. 带自带模板的模型被套上通用模板（能力被删掉）
 
-我们的旧 `run_strata.sh` 每次启动都会把 froggeric 修复版模板拷进"第一个 pack 的 tokenizer"。
+我们的旧 `run_strata.sh` 每次启动都会把修复版模板（froggeric v22.5，现在换 Sharp-naze v1.5）拷进"第一个 pack 的 tokenizer"。
 对 UD-Q4_K_XL 是必要的（原装模板有 bug）；但对 **DavidAU 这类自带 22 万字符模板、27 推理 + 27 指令模式
 + AI Constructs 的模型，这等于把它的核心能力删掉**，而且**没有任何报错**——只是"变笨了"。
 
@@ -304,23 +304,23 @@ systemd-run --user --unit=strata-prod --collect \
 
 ## 🔴 49. 自定义 chat 模板被 `setup.sh` 冲掉
 
-`setup.sh` 每次都会从 GGUF **重新导出** `tokenizer.chat_template.jinja`；手工换上的 froggeric 模板**必被覆盖**，
+`setup.sh` 每次都会从 GGUF **重新导出** `tokenizer.chat_template.jinja`；手工换上的模板（Sharp-naze v1.5 / froggeric v22.5）**必被覆盖**，
 而且不报错，只表现为"reasoning effort / 工具调用行为突然变了"。
 
 判据：
 
 ```bash
 wc -c <pack>/tokenizer/chat_template.jinja
-#   生产 v5.9：28234（froggeric v22.5） | unsloth 原装（GGUF 打包）：9993
+#   生产 v6.0：34422（Sharp-naze v1.5） | 11-09 之前：28234（froggeric v22.5） | unsloth 原装（GGUF 打包）：9993
 #   复现 v5.8 才用：v3 合并模板 249545 | v2 248855 | v1 246686 | DavidAU 原装 226745
 curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["chat_template"]))'
-#   生产 v5.9：28226 | v5.8：243742
+#   生产 v6.0：34386 | v5.9 前期：28226 | v5.8：243742
 ```
 
 恢复：
 
 ```bash
-cp qwen4090-repo/patches/froggeric_v22.5.jinja \
+cp qwen4090-repo/patches/sharp-naze_v1.5.jinja \
    strata/Strata-data/packs/unsloth-ud-q4kxl-ablit-l1/tokenizer/chat_template.jinja
 # 然后重启（热启约 53 秒）
 ```
@@ -329,7 +329,7 @@ cp qwen4090-repo/patches/froggeric_v22.5.jinja \
 
 ## 🔴 50. 自动选模式（仅 v5.3–v5.8，已退役）
 
-v5.9 换成官方 UD-Q4_K_XL 后，模板是纯 froggeric v22.5，**没有模式正文、也没有自动选模式**；
+v5.9 换成官方 UD-Q4_K_XL 后，模板不再带模式正文（11-09 起是 Sharp-naze v1.5，之前是 froggeric v22.5），**没有自动选模式**；
 `patches/08_qwen38_froggeric_v225_with_dau_modes.jinja` 与 `patches/08_auto_check.py` 只用于复现旧版本。
 当时的判据（模板 249545、`dau-modes-v3`、`prompt_tokens ≈2847`）不要拿来判当前生产。
 模板校验见 [OPERATIONS.md](OPERATIONS.md) §1a，历史口径见 [HISTORY.md](HISTORY.md)。
