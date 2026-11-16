@@ -39,7 +39,7 @@
   拿到的是 7 条工具调用修复（`#4828` 多个工具 + 强制 `tool_choice` 从 0/24 修到 24/24 最关键，另有 `#5312`/`#5409`/`#5276`/`#4832`/`#4622`）
   与引擎 `#5108`（行表越界读取会 fault 长 CUDA prompt）、`#5096/#4844`（copy 顺序、丢失的 adaptive swap）。
   同协议实测 6.25K prompt 5,177 t/s、12.7K 5,526 t/s、4 并发 215 t/s，与 0.1.57 差在 ±1% 噪声内；停机 48 s。见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md)。
-- **v5.9（换模型）**：引擎不动，权重从 DavidAU IQ3_S（83.86 GB，3.4 bpw）换成官方 unsloth v3.1 **UD-Q4_K_XL**（111.33 GB），
+- **v5.9（换模型）**：引擎不动，权重从 DavidAU IQ3_S（83.86 GB，3.4 bpw）换成官方 unsloth **UD-Q4_K_XL**（111.33 GB；**Dynamic v3.0**，见 [STRATA-MODEL §2.1](STRATA-MODEL-2026-11-08.md)），
   再用 huihui-ai v2 的 `patch-all` 消融 48 个 `ssm_out` / `attn_output` 张量（不动 routed experts），pack 用 `iq_pack.py` 现建 v4，
   模板换回 froggeric v22.5；当晚发现档 2 会破坏工具链（推理当正文、工具调用变文本），重建为档 1（48 张量）并切换。质量明显上行，代价是 33% 的权重体积：4 并发 215→186 t/s；单流 158–164→**112.8 t/s（default）**、133–135 t/s（`reasoning_effort=low`）。见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)。
 - **遗留**：`#3952`（sm_89 + 262144 ctx + `--spec 4` 的 VRAM 崩塌报告）仍 open；我们靠 `--vram-reserve-mib 2560` + `--kv-resident 32768` 维持 ~2,480 MiB 余量。
@@ -51,6 +51,6 @@
 - FreeToken / Lsglang / 官方 sglang 的 venv、启动脚本、权重与补丁（2026-10-18 清理）；旧补丁在
   [`archive/patches/`](../archive/patches/)，旧脚本在 [`archive/scripts/`](../archive/scripts/)。
 - v5.1 的旧 3 片版 UD-Q4_K_XL（111.33 GB，49.86/49.38/12.09 GB 切分）与 NVFP4（126 GiB）权重已删；
-  现行 v5.9 用的是 2026-11-04 重切的 v3.1 四片版（总量同为 111.33 GB，边界不同），两者不是同一批文件。
+  现行 v5.9 用的是 2026-11-04 重切过的四片版（总量 111,334,654,784 → 111,334,654,778 B，只差 6 B：把 IQ4_NL engram 表独立成 shard4，权重张量未重量化），两者不是同一批文件。
 - **2026-11-08 第二轮删除（用户要求，物理删除、无归档）**：DavidAU IQ3_S（83.86 GB，78.1 GiB）及其 pack/旧 mmproj、vLLM 源码 + conda env + `~/.cache/vllm`、
   `LLM_MODEL` 里的 NVFP4 / FP8 权重、Strata 0.2.2–0.2.11 旧树与旧 config/启动脚本全部删掉，共腾出 289 GB。现在只剩 0.2.12 + UD-Q4_K_XL 一条路线。

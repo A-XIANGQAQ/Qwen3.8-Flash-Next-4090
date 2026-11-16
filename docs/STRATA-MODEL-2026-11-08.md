@@ -1,15 +1,16 @@
 # 换模型：unsloth UD-Q4_K_XL + huihui v2 破限（v5.9，2026-11-08）
 
-> **一句话**：权重从 DavidAU IQ3_S（83.86 GB，3.4 bpw）换成官方 unsloth v3.1 **UD-Q4_K_XL**
-> （111.33 GB，4-bit），用 huihui-ai v2 的 `patch-all` 对 48 个 SSM 输出 / 注意力输出张量做消融（档 1）
+> **一句话**：权重从 DavidAU IQ3_S（83.86 GB，3.4 bpw）换成官方 unsloth **UD-Q4_K_XL**
+> （111.33 GB，4-bit；**Dynamic v3.0**，见 §2.1 注），用 huihui-ai v2 的 `patch-all` 对 48 个 SSM 输出 / 注意力输出张量做消融（档 1）
 > （不碰 routed experts），pack 用 0.2.12 的 `iq_pack.py` 现建 v4，模板换回 **froggeric v22.5**。
 > 换来的是质量：WorkBuddy 两道错题 0.17→0.89、0.00→0.69；代价是速度（同协议 4 并发 215→186 t/s）
 > 与两道已高分题的 4–7% 回落；模型与模板同时变，无法单独归因。
 
 ## 1. 为什么换
 
-- DavidAU IQ3_S 是 v3.0 时代的 3.4 bpw 打包；unsloth 在 2026-11-04 重发了 v3.1 Dynamic，
-  `UD-Q4_K_XL` 约 4.3 bpw 的有效精度（top-1 92.3%、KLD 0.0469），比 IQ3_S 高一个档，且是官方权重。
+- DavidAU IQ3_S 是 v3.0 时代的 3.4 bpw 打包；我们的 `UD-Q4_K_XL` 也是 **Dynamic v3.0**（2026-08-26 上传）。unsloth 的 Dynamic v3.1 于 2026-11-04 发布，但只重做了
+  IQ1_S…Q3_K_XL 这 8 个低比特量化（**`UD-Q4_K_XL` 未重量化**，见 §2.1 注）。`UD-Q4_K_XL` 约 4.3 bpw 的
+  有效精度（top-1 92.3%、KLD 0.0469），仍比 IQ3_S 高一个档，且是官方权重。
 - 破限用 huihui-ai v2 的消融补丁：只改 `ssm_out` / `attn_output`
   （`--ablate-experts 1`，`--start-layer 0 --end-layer 48`），**不消融任何 routed expert**，
   保留模型知识；8 条探针（6 对抗 + 2 对照）8/8 不拒答。
@@ -27,7 +28,7 @@
 
 ### 2.1 官方权重（ModelScope，实测 11–12 MB/s）
 
-`modelscope.cn/models/unsloth/Qwen3.8-Flash-Next-GGUF` → `UD-Q4_K_XL/`（v3.1 现行 4 片）：
+`modelscope.cn/models/unsloth/Qwen3.8-Flash-Next-GGUF` → `UD-Q4_K_XL/`（2026-11-04 重切分的现行 4 片）：
 
 | 文件 | 字节 | sha256 |
 |---|---:|---|
@@ -40,8 +41,15 @@
 四片合计 **111,334,654,778 B**；加 mmproj 共 **112,242,197,722 B**。shard1 只有 metadata/tokenizer（0 张量），张量在 shard2（层 0–28，726 个）
 与 shard3（层 28–47，497 个），shard4 只有一个 `per_layer_token_embd.weight`。
 
+> **关于量化代际（2026-11-16 更正）**：`UD-Q4_K_XL` 是 **Dynamic v3.0** 量化（2026-08-26 上传）；
+> 现在这四片的 lastCommit 是 2026-11-04 16:00 的 `Add mix n match engram`，与父提交
+> （`Better UD 3.1 quants`）相比总字节只差 6 B（111,334,654,784 → 111,334,654,778），
+> 内容只是把 28.8 GB 的 IQ4_NL engram 表拆出来独立成 shard4，**权重张量没有重做**。
+> 2026-11-04 的 Dynamic v3.1 只重发了 UD-IQ1_S/IQ1_M/IQ2_XS/IQ3_XXS/IQ4_XS/Q2_0/Q2_K_XL/Q3_K_XL
+> 八个目录，UD-Q5_K_XL、UD-Q6_K_XL 也仍是 2026-08-26 的原版。
+
 > 别下 huihui 仓库里 27 天前的 `unsloth-UD-Q4_K_XL/`：那是旧切分（49.86 / 49.38 / 12.09 GB），
-> 与 v3.1 的边界不同，补丁覆盖也对不上。官方 v3.1 必须从 unsloth 下，再本地打补丁。
+> 与现行切分的边界不同，补丁覆盖也对不上。官方权重必须从 unsloth 下，再本地打补丁。
 
 ### 2.2 破限补丁（HF，0.4–0.5 MB/s，约 2.4 h）
 

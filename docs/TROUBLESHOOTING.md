@@ -211,7 +211,7 @@ python3 scripts/find_ple_shard.py --strata strata/Strata <shard1.gguf> <shard2.g
 ```
 
 写错分片的症状是启动就失败（不是慢，也不是 OOM）。⇒ `--ple-gguf` 指到含 PLE 的那一片。
-v3.1 的 UD-Q4_K_XL 是 **`-00004-of-00004`**（IQ4_NL，28.8 GB，`shape [160, 320001536]`）；shard1 只有 10.9 MB metadata。
+UD-Q4_K_XL 的 PLE 表在 **`-00004-of-00004`**（IQ4_NL，28.8 GB，`shape [160, 320001536]`）；shard1 只有 10.9 MB metadata。
 
 ## 🔴 44. 给第三方/微调 GGUF 建 pack：只调 `iq_pack.py`，别跑 setup
 
@@ -219,7 +219,7 @@ v3.1 的 UD-Q4_K_XL 是 **`-00004-of-00004`**（IQ4_NL，28.8 GB，`shape [160, 
 .venv/bin/python tools/iq_pack.py --gguf <shard1> --out <pack> --compat-bf16
 ```
 
-- **必须等四片都下完**（v3.1 是 `-0000N-of-00004`；缺片直接报错，不会悄悄跳过）。
+- **必须等四片都下完**（四片命名 `-0000N-of-00004`；缺片直接报错，不会悄悄跳过）。
 - **必须用 `Strata/.venv/bin/python`**：`iq_pack.py` 末尾用 `sys.executable` 调 `strata_tokenizer.py`，
   系统 python 3.14 没有 `regex` 会直接失败；而 `native_experts.txt` 是最后写的完成标记 ⇒ 其余文件都在、
   看起来只差一个，实际 pack 不可用。

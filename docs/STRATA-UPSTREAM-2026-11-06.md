@@ -5,6 +5,8 @@
 - 升级前：Strata **0.2.10 + engine 0.1.56**（v5.6），DavidAU Qwen3.8 IQ3_S，单 RTX 4090 48GB（sm_89），`"parallel": 4`（服务端补 `--batch 4`），`--mtp` + `--batch-mtp` + `--spec 4`
 - 上一篇：[STRATA-UPSTREAM-2026-11-03.md](STRATA-UPSTREAM-2026-11-03.md)
 
+> **更正（2026-11-16）**：本文把 unsloth 的 `UD-Q4_K_XL` 称作 "Dynamic v3.1" 不准确——它是 **Dynamic v3.0**（2026-08-26 上传）；11-04 的 3.1 更新只重发了 8 个低比特量化（IQ1_S…Q3_K_XL），Q4_K_XL 仅做了 engram 重切分（四片总量只差 6 B，权重张量未重量化）。以上历史表述保留不改，仅作说明；细节见 [STRATA-MODEL-2026-11-08.md §2.1](STRATA-MODEL-2026-11-08.md)。
+
 ---
 
 ## 0. 结论

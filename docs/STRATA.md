@@ -25,7 +25,7 @@ conversation cache、KV 流式与 MTP 投机解码。
 
 ## 2. 模型：unsloth UD-Q4_K_XL（huihui v2 消融）
 
-`unsloth/Qwen3.8-Flash-Next-GGUF` → `UD-Q4_K_XL/`（v3.1 Dynamic，2026-11-04），再用 huihui-ai v2 的
+`unsloth/Qwen3.8-Flash-Next-GGUF` → `UD-Q4_K_XL/`（Dynamic v3.0；2026-11-04 仅 engram 重切分，权重未重量化），再用 huihui-ai v2 的
 `patch-all` 做 48 张量消融（档 1）。
 
 | 项 | 值 |

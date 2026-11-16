@@ -61,10 +61,10 @@ curl -L https://raw.githubusercontent.com/Niko1221/Strata/v0.2.12/data/expert-pr
 `strata/Strata/` 不是安装目录，只是沿用本机的路径布局（装 venv、data/、旧 gguf-py 的地方）；
 `strata/Strata-0.2.12/` 才是服务端源码树。
 
-## 4. 模型（unsloth UD-Q4_K_XL v3.1，4 shards）
+## 4. 模型（unsloth UD-Q4_K_XL，4 shards；Dynamic v3.0）
 
 ```bash
-# 官方 v3.1 四片 + mmproj（ModelScope，实测 11–12 MB/s，约 3 小时）
+# 官方 UD-Q4_K_XL 四片 + mmproj（ModelScope，实测 11–12 MB/s，约 3 小时）
 modelscope download --model unsloth/Qwen3.8-Flash-Next-GGUF \
   --include 'UD-Q4_K_XL/*' --include 'mmproj-BF16.gguf' \
   --local_dir /path/to/unsloth-UD-Q4_K_XL
@@ -118,7 +118,7 @@ shard1 / shard4 用软链指进 `<abl>/`（实测 `lrwxrwxrwx`），不重写。
 pack 是「GGUF 权重 + tokenizer + 专家 profile」的布局，由 Strata 自带的打包工具生成：
 
 ```bash
-# PLE 表在 shard4（v3.1 布局）
+# PLE 表在 shard4（UD-Q4_K_XL 现行布局）
 strata/venv/bin/python scripts/find_ple_shard.py --strata strata/Strata-0.2.12   # 需 STRATA_GGUF_PY \
   /path/to/...-00001-of-00004.gguf /path/to/...-00002-of-00004.gguf \
   /path/to/...-00003-of-00004.gguf /path/to/...-00004-of-00004.gguf
