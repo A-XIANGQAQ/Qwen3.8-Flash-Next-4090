@@ -41,7 +41,7 @@
 四片合计 **111,334,654,778 B**；加 mmproj 共 **112,242,197,722 B**。shard1 只有 metadata/tokenizer（0 张量），张量在 shard2（层 0–28，726 个）
 与 shard3（层 28–47，497 个），shard4 只有一个 `per_layer_token_embd.weight`。
 
-> **关于量化代际（2026-11-16 更正）**：`UD-Q4_K_XL` 是 **Dynamic v3.0** 量化（2026-08-26 上传）；
+> **关于量化代际**：`UD-Q4_K_XL` 是 **Dynamic v3.0** 量化（2026-08-26 上传）；
 > 现在这四片的 lastCommit 是 2026-11-04 16:00 的 `Add mix n match engram`，与父提交
 > （`Better UD 3.1 quants`）相比总字节只差 6 B（111,334,654,784 → 111,334,654,778），
 > 内容只是把 28.8 GB 的 IQ4_NL engram 表拆出来独立成 shard4，**权重张量没有重做**。
