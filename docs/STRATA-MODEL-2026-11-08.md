@@ -118,7 +118,7 @@ tokenizer：vocab 248,320 / merges 247,587 / eos 248,046 / bos=pad 248,044。
 | 冷启动 | **106 s**（页缓存冷；arena 每次启动都重填，本次 1.68 GiB/s） |
 | 热启动 | **53 s**（页缓存命中，12.49 GiB/s；PLE 加载 14.4 s → 0.1 s） |
 | 切到档 1（16:55） | 停机 9 s、**65 s 就绪**（页缓存半热） |
-| 验收 | **31/31 PASS**（`scripts/accept_q4kxl.sh`，11-08 口径；当前 v6.0 用 `accept_q4kxl_0214.sh`，23/23） |
+| 验收 | **31/31 PASS**（`scripts/accept_q4kxl.sh`，11-08 口径；当前 v6.1 用 `accept_q4kxl_0215.sh`，24/24） |
 | `/health` | `model=qwen3.8-flash-next-q4kxl-ablit-l1`、`max_context=262144`、`images=true` |
 | `/props` | `build_info "Strata 0.1.58"`、`len(chat_template) = 28226`（11-08 口径；11-09 起模板换 Sharp-naze，现为 34386） |
 

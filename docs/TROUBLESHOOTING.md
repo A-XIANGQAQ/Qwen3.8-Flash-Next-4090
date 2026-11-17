@@ -1,6 +1,6 @@
 # 排障手册 (Troubleshooting)
 
-> 只保留 **v6.0（Strata 0.2.14 + engine 0.1.60 + unsloth UD-Q4_K_XL 档 1 + Sharp-naze v1.5）** 仍适用的条目。
+> 只保留 **v6.1（Strata 0.2.15 + engine 0.1.60 + unsloth UD-Q4_K_XL 档 1 + Sharp-naze v1.5）** 仍适用的条目。
 > v1–v4 的坑（编号 1–10、13–17、19–28）已随运行时删除，需要时看 git 历史。
 > 严重度：🔴 会停服 / 🟡 性能或质量受损 / 🔵 认知陷阱 / 🟢 测量与操作习惯。
 
@@ -151,7 +151,7 @@ CUDA error: out of memory
   静默降级——旧 server 会按「引擎太老/太新」处理，不报错，只少给功能。
 - 判据：`engine/BUILD.json` 的 `version`、`engine/strata --version`、`/props` 的 `build_info`、
   `serve/server.py` 里 `PARALLEL_MAX`、`setup.py` 里 `MIN_ENGINE` 应当指向同一代。
-  本站当前已知可用配对：**服务端 0.2.14 + 引擎 0.1.60**（`/props.build_info = "Strata 0.1.60"`）；0.2.12 + 0.1.58 保留作上一代回滚，更早的旧树已删除、回退需重下。
+  本站当前已知可用配对：**服务端 0.2.15 + 引擎 0.1.60**（`/props.build_info = "Strata 0.1.60"`，0.2.14 也报同一句）；0.2.12 + 0.1.58 保留作上一代回滚，更早的旧树已删除、回退需重下。
 - 修法：整套换。见 [OPERATIONS.md](OPERATIONS.md) §1c。
 
 ## 🔴 40. 别让 `update.sh` / `setup.py` 碰你的模型分片
@@ -311,10 +311,10 @@ systemd-run --user --unit=strata-prod --collect \
 
 ```bash
 wc -c <pack>/tokenizer/chat_template.jinja
-#   生产 v6.0：34422（Sharp-naze v1.5） | 11-09 之前：28234（froggeric v22.5） | unsloth 原装（GGUF 打包）：9993
+#   生产 v6.1：34422（Sharp-naze v1.5） | 11-09 之前：28234（froggeric v22.5） | unsloth 原装（GGUF 打包）：9993
 #   复现 v5.8 才用：v3 合并模板 249545 | v2 248855 | v1 246686 | DavidAU 原装 226745
 curl -s 127.0.0.1:8000/props | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["chat_template"]))'
-#   生产 v6.0：34386 | v5.9 前期：28226 | v5.8：243742
+#   生产 v6.1：34386 | v5.9 前期：28226 | v5.8：243742
 ```
 
 恢复：
@@ -333,6 +333,25 @@ v5.9 换成官方 UD-Q4_K_XL 后，模板不再带模式正文（11-09 起是 Sh
 `patches/08_qwen38_froggeric_v225_with_dau_modes.jinja` 与 `patches/08_auto_check.py` 只用于复现旧版本。
 当时的判据（模板 249545、`dau-modes-v3`、`prompt_tokens ≈2847`）不要拿来判当前生产。
 模板校验见 [OPERATIONS.md](OPERATIONS.md) §1a，历史口径见 [HISTORY.md](HISTORY.md)。
+
+---
+
+## 🔵 51. 0.2.15 与 0.2.14 的 `build_info` 相同，怎么确认真的换上了
+
+0.2.15 只换 serve 源码树、引擎仍是 0.1.60，所以 `/props.build_info` 两个版本都报 `"Strata 0.1.60"`。
+判据看进程，不看版本字符串：
+
+```bash
+for p in $(pgrep -f '[s]erve/server.py'); do
+  echo "$p -> $(readlink /proc/$p/cwd)"
+done
+# 期望：Strata-0.2.15
+```
+
+启动日志里还能看到引擎路径：`engine started: …/Strata-0.2.15/engine/strata --serve …`。
+
+⚠️ 别用 `pgrep -f 'Strata-0.2.15/serve/server.py'`：启动器是 `cd Strata-0.2.15 && python ./serve/server.py`，
+命令行里只有相对路径，这样 grep 永远是 0（2026-11-17 切替时就踩了，脚本误报 FAIL）。
 
 ---
 

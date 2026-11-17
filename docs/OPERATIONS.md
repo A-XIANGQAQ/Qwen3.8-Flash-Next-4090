@@ -1,6 +1,6 @@
 # 运维手册 (Operations)
 
-> 当前只有 **v6.0：Strata 0.2.14 服务端 + engine 0.1.60 + unsloth UD-Q4_K_XL（huihui v2 破限档 1）+ Sharp-naze v1.5**。
+> 当前只有 **v6.1：Strata 0.2.15 服务端 + engine 0.1.60 + unsloth UD-Q4_K_XL（huihui v2 破限档 1）+ Sharp-naze v1.5**。
 > 引擎细节见 [STRATA.md](STRATA.md)，换模型见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)，
 > 模板见 [TEMPLATE.md](TEMPLATE.md)，实测见 [BENCHMARK.md](BENCHMARK.md)。
 
@@ -12,7 +12,7 @@
 #    setsid 只脱离终端/会话、脱不出 cgroup；dsh-web 重启时 server/strata/strata-vision 整组被 SIGTERM。
 #    症状：日志只有 stopping (Ctrl+C again...)，没有 traceback / CUDA / OOM。
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
-# 就绪：日志行 ready:（0.1.58 + UD-Q4_K_XL 实测：页缓存命中 53 秒、冷 106 秒；0.1.60 页缓存命中 30 秒）
+# 就绪：日志行 ready:（0.1.58 + UD-Q4_K_XL 实测：页缓存命中 53 秒、冷 106 秒；0.1.60/0.2.15 页缓存命中 28–35 秒）
 #   ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions,
 #                                     Anthropic: /v1/messages, context 262144 tokens)
 ```
@@ -73,7 +73,7 @@ bash strata/run_strata.sh           # 指向新树/新 config
 
 **三条铁律**：
 
-1. **server / engine / vision 必须同代**。0.2.14 的 `MIN_ENGINE` 仍是 `(0,1,46)`（只在 setup.py 校验；serve 侧无版本门控），但新引擎特性只在 0.1.60；
+1. **server / engine / vision 必须同代**。0.2.15 的 `MIN_ENGINE` 仍是 `(0,1,46)`（只在 setup.py 校验；serve 侧无版本门控），但新引擎特性只在 0.1.60；
    只换一个会静默少功能（[#39](TROUBLESHOOTING.md)）。
 2. **不要跑 setup 主流程**：`carry_over()` 不合并手工 args（30 个手调参数会丢）；#2902 还会删大分片。
 3. **`engine/` 整目录替换**，不能只拷 `strata` + `strata-vision`：0.1.44 起还有 `libstrata_kq.so`。
@@ -81,7 +81,7 @@ bash strata/run_strata.sh           # 指向新树/新 config
 **回滚**：引擎层面停服务 → 等显存 <1000 MiB → 换回旧 `engine/` 目录；但**旧模型与旧 tree 已在 2026-11-08 物理删除**，
 模型回滚要重下权重并重建 pack（见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md) §12）。
 
-### 1.1 0.2.9–0.2.12 服务端会自动塞 11 个环境变量（0.2.13 起搬进引擎，0.2.14 服务端不再注入）
+### 1.1 0.2.9–0.2.12 服务端会自动塞 11 个环境变量（0.2.13 起搬进引擎，0.2.13+ 服务端不再注入）
 
 `serve/server.py` 在起引擎前用 `env.setdefault()` 补默认值，**自己设过的值永远优先**：
 

@@ -4,7 +4,7 @@
 一个自带 C++/CUDA 引擎，复用 llama.cpp 的 ggml/gguf-py/mtmd，做 MoE 专家分层（VRAM/RAM/SSD）、
 conversation cache、KV 流式与 MTP 投机解码。
 
-**当前固定身份**：Strata **0.2.14** 服务端 + **engine 0.1.60**（预编译，arch 含 sm_89）+ unsloth **UD-Q4_K_XL**（huihui v2 消融**档 1**）+ **Sharp-naze v1.5** 模板。
+**当前固定身份**：Strata **0.2.15** 服务端 + **engine 0.1.60**（预编译，arch 含 sm_89）+ unsloth **UD-Q4_K_XL**（huihui v2 消融**档 1**）+ **Sharp-naze v1.5** 模板。
 版本演进见 [HISTORY.md](HISTORY.md)，实测见 [BENCHMARK.md](BENCHMARK.md)，换模型见
 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)，升级判断见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md)。
 
@@ -48,7 +48,7 @@ conversation cache、KV 流式与 MTP 投机解码。
 - `carry_over()` 会重写 run config，**手工加进 `args` 的 12 个参数不会合并**
 - 0.1.44+ 的分片 SHA 校验有 #2902（大分片误判并删文件）
 
-**必须整代配对**：`serve/server.py`（0.2.14）+ `engine/strata` + `engine/strata-vision`（0.1.60）同代。
+**必须整代配对**：`serve/server.py`（0.2.15）+ `engine/strata` + `engine/strata-vision`（0.1.60）同代。
 只换其中一个不报错，但会静默降级（[TROUBLESHOOTING #39](TROUBLESHOOTING.md)）。
 
 ## 4. 关键参数
@@ -131,13 +131,13 @@ DavidAU 的 29 段模式合并模板（249,545 B）只用于复现 v5.3–v5.8�
 
 ## 11. 已验证 / 未验证
 
-**已在 v6.0（0.2.14 + 0.1.60 + UD-Q4_K_XL）上验证**：
+**已在 v6.1（0.2.15 + 0.1.60 + UD-Q4_K_XL）上验证**：
 
 - **历史口径**（2026-10-25，IQ3_S + 0.1.47，vLLM 基准，不代表 v5.9）：1K / 8K / 32K / 64K / 128K / 260K prefill 与 1K / 32K / 128K / 260K decode，2–4 路并发；见 [BENCHMARK.md](BENCHMARK.md) §1–§9
 - v5.9 实际复测范围：6.25K / 12.7K prompt、4 路 512-token 并发、单流 default/low（见下条）
 - 4×256K 配置与 KV 流式；`k8v4`；`--batch-mtp` 并发
 - 视觉三色条 3/3（0.1.45 时代，样本小）；专家缓存 **32,595 MiB / 10,902 槽**；arena **73,450 MiB**（专家全驻 RAM）；启动后空闲显存 2,517 MiB
-- **0.2.9 的 11 个新默认环境变量逐个在引擎进程里确认生效**（9 并行 + 2 GDN），0.2.12 上仍是同一组；0.2.13 起默认值搬进引擎、服务端不再注入；`drafting = mtp`；**v6.0 验收 23/23**；0.1.60 上 6.2K prompt 2,795 t/s、12.8K 4,783 t/s、20K 4,847、30K 4,939 t/s，4 并发 175–187 t/s（与 11-08 的 0.1.58 空缓存 186–188 持平）
+- **0.2.9 的 11 个新默认环境变量逐个在引擎进程里确认生效**（9 并行 + 2 GDN），0.2.12 上仍是同一组；0.2.13 起默认值搬进引擎、服务端不再注入；`drafting = mtp`；**v6.1 验收 24/24（0.2.15 只换 serve 树，多一项 cwd 断言）**；0.1.60 上 6.2K prompt 2,795 t/s、12.8K 4,783 t/s、20K 4,847、30K 4,939 t/s，4 并发 175–187 t/s（与 11-08 的 0.1.58 空缓存 186–188 持平）
 - 0.2.11 引入、0.1.58/0.1.60 仍为 **FP16 weight cache 0 MiB**（需分配后留 3,072 MiB 空闲，本机余 ~2,900 MiB），因此上游 4 路 +5.7% 未复现；`pcie_frac` 由 0.55 变为按 CPU 实测的 **0.15**
 - 0.1.43.1 曾连续跑 2 天 23 小时（被 cgroup 连带杀，不是自崩）
 
