@@ -1,6 +1,6 @@
 # 排障手册 (Troubleshooting)
 
-> 只保留 **v6.1（Strata 0.2.15 + engine 0.1.60 + unsloth UD-Q4_K_XL 档 1 + Sharp-naze v1.5）** 仍适用的条目。
+> 只保留 **v6.2（Strata 0.2.16 + engine 0.1.62 + unsloth UD-Q4_K_XL 档 1 + Sharp-naze v1.5）** 仍适用的条目。
 > v1–v4 的坑（编号 1–10、13–17、19–28）已随运行时删除，需要时看 git 历史。
 > 严重度：🔴 会停服 / 🟡 性能或质量受损 / 🔵 认知陷阱 / 🟢 测量与操作习惯。
 
@@ -151,7 +151,7 @@ CUDA error: out of memory
   静默降级——旧 server 会按「引擎太老/太新」处理，不报错，只少给功能。
 - 判据：`engine/BUILD.json` 的 `version`、`engine/strata --version`、`/props` 的 `build_info`、
   `serve/server.py` 里 `PARALLEL_MAX`、`setup.py` 里 `MIN_ENGINE` 应当指向同一代。
-  本站当前已知可用配对：**服务端 0.2.15 + 引擎 0.1.60**（`/props.build_info = "Strata 0.1.60"`，0.2.14 也报同一句）；0.2.12 + 0.1.58 保留作上一代回滚，更早的旧树已删除、回退需重下。
+  本站当前已知可用配对：**服务端 0.2.16 + 引擎 0.1.62**（`/props.build_info = "Strata 0.1.62"`）；0.2.15 + 0.1.60 保留作上一代回滚；更早的旧树已删除、回退需重下。
 - 修法：整套换。见 [OPERATIONS.md](OPERATIONS.md) §1c。
 
 ## 🔴 40. 别让 `update.sh` / `setup.py` 碰你的模型分片
@@ -336,22 +336,38 @@ v5.9 换成官方 UD-Q4_K_XL 后，模板不再带模式正文（11-09 起是 Sh
 
 ---
 
-## 🔵 51. 0.2.15 与 0.2.14 的 `build_info` 相同，怎么确认真的换上了
+## 🔵 51. 怎么确认真的换上了（进程 cwd 判据）
 
-0.2.15 只换 serve 源码树、引擎仍是 0.1.60，所以 `/props.build_info` 两个版本都报 `"Strata 0.1.60"`。
-判据看进程，不看版本字符串：
+0.2.16 起引擎是 0.1.62，`/props.build_info` 已能区分；但「源码树换没换」仍要看进程，不看版本字符串。
+（历史：0.2.15 与 0.2.14 都报 `"Strata 0.1.60"`，只能靠这一招。）
 
 ```bash
 for p in $(pgrep -f '[s]erve/server.py'); do
   echo "$p -> $(readlink /proc/$p/cwd)"
 done
-# 期望：Strata-0.2.15
+# 期望：Strata-0.2.16（0.2.15 时期是 Strata-0.2.15）
 ```
 
-启动日志里还能看到引擎路径：`engine started: …/Strata-0.2.15/engine/strata --serve …`。
+启动日志里还能看到引擎路径：`engine started: …/Strata-0.2.16/engine/strata --serve …`。
 
-⚠️ 别用 `pgrep -f 'Strata-0.2.15/serve/server.py'`：启动器是 `cd Strata-0.2.15 && python ./serve/server.py`，
+⚠️ 别用 `pgrep -f 'Strata-0.2.16/serve/server.py'`：启动器是 `cd Strata-0.2.16 && python ./serve/server.py`，
 命令行里只有相对路径，这样 grep 永远是 0（2026-11-17 切替时就踩了，脚本误报 FAIL）。
+
+---
+
+---
+
+## 🔵 52. 0.2.16 的 `serve/` 在哪，为什么 `Strata-0.2.16/terminal` 不存在
+
+上游 0.2.16 把服务端搬进 `terminal/serve/`（顶层还有 `engine/`、`app/`、`docs/`、`tools/`）。
+本机是**平铺**部署：只取 `terminal/{serve,tools,strata_control,strata_cli}` 放到 `Strata-0.2.16/` 根下，
+启动器 `cd Strata-0.2.16 && python ./serve/server.py`。所以：
+
+- 找源码：`strata/Strata-0.2.16/serve/server.py`（不是 `terminal/serve/server.py`）；
+- 找工具：`strata/Strata-0.2.16/tools/iq_pack.py`；
+- 想按上游原样放也行，但 config 的 `cwd` 要指到 `terminal/`，`vision.exe`/`exe` 仍指 `engine/`。
+
+⚠️ 不要跑 `setup.py` / `update.sh` / `--update`：会把设置与引擎搬进 `terminal/`、把模型移到克隆旁 `Strata-data`。
 
 ---
 

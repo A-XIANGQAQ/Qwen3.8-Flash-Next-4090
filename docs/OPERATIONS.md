@@ -1,6 +1,6 @@
 # 运维手册 (Operations)
 
-> 当前只有 **v6.1：Strata 0.2.15 服务端 + engine 0.1.60 + unsloth UD-Q4_K_XL（huihui v2 破限档 1）+ Sharp-naze v1.5**。
+> 当前只有 **v6.2：Strata 0.2.16 服务端 + engine 0.1.62 + unsloth UD-Q4_K_XL（huihui v2 破限档 1）+ Sharp-naze v1.5**。
 > 引擎细节见 [STRATA.md](STRATA.md)，换模型见 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)，
 > 模板见 [TEMPLATE.md](TEMPLATE.md)，实测见 [BENCHMARK.md](BENCHMARK.md)。
 
@@ -12,7 +12,7 @@
 #    setsid 只脱离终端/会话、脱不出 cgroup；dsh-web 重启时 server/strata/strata-vision 整组被 SIGTERM。
 #    症状：日志只有 stopping (Ctrl+C again...)，没有 traceback / CUDA / OOM。
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
-# 就绪：日志行 ready:（0.1.58 + UD-Q4_K_XL 实测：页缓存命中 53 秒、冷 106 秒；0.1.60/0.2.15 页缓存命中 28–35 秒）
+# 就绪：日志行 ready:（0.1.58 + UD-Q4_K_XL 实测：页缓存命中 53 秒、冷 106 秒；0.1.60–0.1.62 / 0.2.15–0.2.16 页缓存命中 28–35 秒）
 #   ready: http://127.0.0.1:8000/v1  (OpenAI: /v1/chat/completions,
 #                                     Anthropic: /v1/messages, context 262144 tokens)
 ```
@@ -73,7 +73,7 @@ bash strata/run_strata.sh           # 指向新树/新 config
 
 **三条铁律**：
 
-1. **server / engine / vision 必须同代**。0.2.15 的 `MIN_ENGINE` 仍是 `(0,1,46)`（只在 setup.py 校验；serve 侧无版本门控），但新引擎特性只在 0.1.60；
+1. **server / engine / vision 必须同代**。0.2.16 的 `MIN_ENGINE` 仍是 `(0,1,46)`（只在 setup.py 校验；serve 侧无版本门控），但新引擎特性只在 0.1.60；
    只换一个会静默少功能（[#39](TROUBLESHOOTING.md)）。
 2. **不要跑 setup 主流程**：`carry_over()` 不合并手工 args（30 个手调参数会丢）；#2902 还会删大分片。
 3. **`engine/` 整目录替换**，不能只拷 `strata` + `strata-vision`：0.1.44 起还有 `libstrata_kq.so`。
@@ -96,7 +96,7 @@ bash strata/run_strata.sh           # 指向新树/新 config
 EPID=$(pgrep -x strata); tr '\0' '\n' < /proc/$EPID/environ | grep -E 'STRATA_(CKPT_POOL|QSA_SLOTS|GDN_)'
 ```
 
-### 1.2 0.2.11 起的两条新默认（0.1.58 / 0.1.60 仍如此，在 48 GB 卡上要知道）
+### 1.2 0.2.11 起的两条新默认（0.1.58–0.1.62 仍如此，在 48 GB 卡上要知道）
 
 1. **FP16 weight cache**：`--parallel`/`--batch` ≥2 时自动开，规则是「分配后卡上仍留 3,072 MiB 空闲」。
    本机启动后只剩 ~2,900 MiB，于是从 0 MiB 起步，日志固定这一行——**看到它不是故障**：
@@ -135,7 +135,7 @@ bash strata/stop_strata.sh          # 停 serve + engine，并等显存降到 <1
 ## 4. 日志
 
 - 就绪：`ready: http://127.0.0.1:8000/v1 ... context 262144 tokens`
-- 会话：`session is up (engine 0.1.60)`；并发：`--batch: 4 slot sessions on CUDA0`
+- 会话：`session is up (engine 0.1.62)`；并发：`--batch: 4 slot sessions on CUDA0`
 - 视觉：`strata serve: N MiB of VRAM free with everything loaded`，**N 必须 ≥1600**
 - 每请求：`prompt ... tokens = ... reused + ... read in ... ms (... tok/s), ... generated in ... ms (... tok/s)`
 - ⚠️ 启动器用 `> log` 会**截断**旧日志；重启前要留证据就先备份或改 `>>`
@@ -172,7 +172,7 @@ curl -s 127.0.0.1:8000/v1/messages/count_tokens -H 'Content-Type: application/js
 
 | 字段 | 含义 |
 |---|---|
-| `engine.engine` / `engine.model` | 引擎版本（0.1.60）/ served name |
+| `engine.engine` / `engine.model` | 引擎版本（0.1.62）/ served name |
 | `engine.kv` / `kv_resident` / `batch_slots` | `k8v4` / 32768 / 4 |
 | `engine.expert_cache_mib` / `expert_slots` | 专家缓存；升级后低于 ~31 GiB 判定不合格 |
 | `engine.vram_free_mib` | 启动后空闲显存；应 ≥1800 |
