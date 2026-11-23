@@ -68,6 +68,7 @@ curl -L https://raw.githubusercontent.com/Niko1221/Strata/v0.2.20/terminal/data/
 `strata/Strata-0.2.20/` 才是服务端源码树，回滚用的 0.2.15 树可以并存。
 
 ⚠️ **sm_89 必须加规避**：config 的 `env` 里写 `"STRATA_HC_Q8_TC": "0"` 与 `"STRATA_HC_Q8_BF16TC": "0"`，否则 0.1.66 的首个请求会崩 `verify: layer 0 never rang`（上游 `#6742`）。
+⚠️ **0.2.20 还要写 `aliases`**：`"aliases": ["Qwen3.8-Flash-Next", "qwen3.8-flash-next-q4kxl-ablit"]`；`#6621` 会拒绝未别名的 Strata 风格模型 id（DSH/Cherry 的旧名字）。
 
 ## 4. 模型（unsloth UD-Q4_K_XL，4 shards；Dynamic v3.0）
 

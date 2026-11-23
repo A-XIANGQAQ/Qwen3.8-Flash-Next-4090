@@ -139,6 +139,7 @@ v5.3 时期（2026-10-25）用 **vLLM 官方 benchmark** 重测了 prefill / dec
 | 引擎 | [Niko1221/Strata](https://github.com/Niko1221/Strata) **0.2.20 服务端 + 0.1.66 预编译引擎**（CUDA 13，arch 含 sm_89，sha256 与官方 `SHA256SUMS.txt` 一致 `13c5bebe…5e059`） |
 | 目录 | 上游 0.2.20 是 `terminal/serve`；本机平铺成 `Strata-0.2.20/{serve,tools,strata_control,strata_cli}`，启动 `cd Strata-0.2.20 && python ./serve/server.py` |
 | 必需规避 | `env` 里 `STRATA_HC_Q8_TC=0` + `STRATA_HC_Q8_BF16TC=0`（0.1.66 在 sm_89 上的 `layer 0 never rang` 回归，上游 `#6742`，修复 PR `#6714` 未并入） |
+| 客户端模型名 | config 顶层 `aliases: ["Qwen3.8-Flash-Next", "qwen3.8-flash-next-q4kxl-ablit"]`——0.2.20 `#6621` 会拒未别名的 Strata 风格 id（DSH/Cherry 沿用旧名会 404），别名下两条路由都 200 |
 | 并发 / 上下文 | `--batch 4` × `--max-context 262144`（每 slot 独立 session） |
 | KV | **`k8v4` + `--kv-resident 32768`**（816 B/cell；KV 流式到宿主内存，4×256K 全放显存会 OOM） |
 | 破限 | **huihui-ai v2 消融补丁档 1**（`ssm_out` / `attn_output`，48/48 命中，不动 routed experts 与 FFN）；强探针 8/8 不拒答，性暴力露骨特写保留软边界（已确认接受） |
@@ -176,6 +177,7 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 ```
 
 ⚠️ **sm_89 必须加规避**：`strata-unsloth-q4kxl-ablit-l1-0220.json` 的 `env` 里 `STRATA_HC_Q8_TC=0` + `STRATA_HC_Q8_BF16TC=0`，否则首个请求就崩 `verify: layer 0 never rang`。
+⚠️ **0.2.20 还要加 `aliases`**：`"aliases": ["Qwen3.8-Flash-Next", "qwen3.8-flash-next-q4kxl-ablit"]`，否则 DSH/Cherry 沿用旧模型 id 会 404 `model_not_found`（`#6621`）。
 ⚠️ **不要跑 `./setup.sh` / `update.sh`**：会重导原装模板（9,993 B）、重写 config（丢手调参数），
 0.1.44+ 还可能因 #2902 删模型分片。升级只换「服务端源码 + 引擎目录」。
 ⚠️ 服务端 / 引擎 / vision 必须同代（0.2.20 ↔ 0.1.66；0.2.19 之后 engine 与 Control 共用版本号）；从 agent 的 bash 工具里起进程会被 systemd cgroup 连坐。

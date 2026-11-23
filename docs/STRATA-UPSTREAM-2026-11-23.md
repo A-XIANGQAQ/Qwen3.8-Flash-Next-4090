@@ -66,6 +66,22 @@ config 的 `env` 里加：
 
 两个 TC kernel 关掉后，Q8 read 回落到 `gr_up_q8_fast_kernel`（官方 issue 作者验证「engine starts here」）。`STRATA_HC_Q8=0` 也可，但会放弃 Q8 超连接读、多占 0.63 GiB 显存。实测两个变量确实进了引擎进程的 `/proc/<pid>/environ`，随后 24/24 验收通过。
 
+
+## 3b. 客户端模型名：0.2.20 的严格匹配（`#6621`）与 `aliases`
+
+0.2.20 起 `check_model()` 会拒绝「看起来像 Strata 目录模型 ID」的名字（前缀 `inkling-2-mini` / `hy4-flash` / `qwen3.8-flash-next` / `qwen3.6-` / `qwen3.5-`），
+即使 `strict_model` 没开：`{"code":"model_not_found","message":"The model 'Qwen3.8-Flash-Next' is not loaded; currently serving 'qwen3.8-flash-next-q4kxl-ablit-l1'"}`。
+DSH（provider 模型 id `Qwen3.8-Flash-Next`）和 Cherry（同名）都会 404，`/v1/messages` 与 `/v1/chat/completions` 一样。
+
+修法是在 config 顶层加别名（列表或逗号串），客户端不用改：
+
+```json
+"aliases": ["Qwen3.8-Flash-Next", "qwen3.8-flash-next-q4kxl-ablit"]
+```
+
+`/v1/models` 会列出 `qwen3.8-flash-next-q4kxl-ablit-l1` + 两个别名；响应里的 `model` 字段回显请求用的别名（`model_for()`）。
+2026-11-23 13:04 重起（30 s）后 `/v1/messages`、`/v1/chat/completions` 用旧名都返回 200，验收 24/24 不受影响。
+
 ## 4. 切替时间线
 
 | 时间 | 事件 |

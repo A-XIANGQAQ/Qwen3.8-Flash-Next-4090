@@ -383,6 +383,14 @@ done
 这是上游 `#6742`（`fused_gr.cu` 的 `q8_ld16()` 用 `__ldg()` 读 `__shared__`，sm_80+ 的 Q8 TC kernel 触发；修复 PR `#6714` 未并入）。
 修复：config 的 `env` 加 `STRATA_HC_Q8_TC=0` + `STRATA_HC_Q8_BF16TC=0`，重启即好；`STRATA_HC_Q8=0` 也可但多占 0.63 GiB、Q8 read 走慢路径。
 
+## 🔵 54. 客户端报 `model 'Qwen3.8-Flash-Next' is not loaded; currently serving '…'`
+
+0.2.20 的 `check_model()`（`#6621`）会拒绝前缀像 Strata 目录 id 的名字（`qwen3.8-flash-next`、`hy4-flash`、`inkling-2-mini`、`qwen3.6-`、`qwen3.5-`），
+`/v1/messages` 与 `/v1/chat/completions` 都一样；`strict_model` 关着也照拒。判据：`/v1/models` 里没有客户端发来的那个名字。
+
+修复：config 顶层加 `"aliases": ["Qwen3.8-Flash-Next"]`（可多个、也接受逗号串），重起即可，不用改客户端。
+`/v1/models` 会列出别名，响应 `model` 字段回显请求用的名字。本机 2026-11-23 用 `Qwen3.8-Flash-Next` + `qwen3.8-flash-next-q4kxl-ablit` 两个别名修复。
+
 ## 立即停止条件 (Stop conditions)
 
 host OOM / swap 持续增长 / NVIDIA Xid / 不可恢复 kernel fault / 同失败连续两次无新证据。
