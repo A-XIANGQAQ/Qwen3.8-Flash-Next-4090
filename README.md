@@ -3,7 +3,8 @@
 一份面向**单卡 RTX 4090（SM89，48GB）**的 Qwen3.8-Flash-Next 部署与实测记录：让 111.33GB 的 MoE 权重
 （6B active）跑在一张消费级卡上——**权重驻内存、CPU 算 experts、GPU 算 attention/PLE/常驻层**。
 
-**当前组合 v6.2 = Strata 0.2.16（服务端）+ engine 0.1.62（预编译）+ unsloth UD-Q4_K_XL（4-bit，huihui v2 破限档 1）+ Sharp-naze v1.5 模板。**
+**当前组合 v6.3 = Strata 0.2.20（服务端）+ engine 0.1.66（预编译）+ unsloth UD-Q4_K_XL（4-bit，huihui v2 破限档 1）+ Sharp-naze v1.5 模板。**
+0.1.66 在 sm_89 上有一个上游回归（首个请求崩 `layer 0 never rang`），本机用 `STRATA_HC_Q8_TC=0` + `STRATA_HC_Q8_BF16TC=0` 规避；细节见 [STRATA-UPSTREAM-2026-11-23.md](docs/STRATA-UPSTREAM-2026-11-23.md)。
 v5.3 时期（2026-10-25）用 **vLLM 官方 benchmark** 重测了 prefill / decode / 并发，原始数据在
 [`bench/results/2026-10-25/`](bench/results/2026-10-25/)。
 
@@ -53,6 +54,22 @@ v5.3 时期（2026-10-25）用 **vLLM 官方 benchmark** 重测了 prefill / dec
 | 4 路聚合 | 175.0 / 187.1 / 185.6 t/s | **182.7 / 184.9 / 185.6 t/s** |
 
 差异在 ±0.5% 噪声内，符合「引擎没变」的预期。切替 14:39:37 开始、14:40:12 就绪（35 s，页缓存命中），验收 **24/24**；模板仍是 Sharp-naze v1.5（34,386 字符）。
+
+## 0.2.20 实测（v6.3，2026-11-23，sm_89 Q8-TC 规避）
+
+0.2.20 的引擎 0.1.66 在 RTX 4090（sm_89）上默认配置会崩：`verify: layer 0 never rang (operation not supported on global/shared address space)`，根因是 `fused_gr.cu` 的 `q8_ld16()` 用 `__ldg()` 读 `__shared__`（上游 `#6742`/`#6700`/`#6745`，修复 PR `#6714` 仍 open）。本机在 config 的 `env` 里关掉两个 Q8 TC kernel（`STRATA_HC_Q8_TC=0`、`STRATA_HC_Q8_BF16TC=0`）后正常。模型、模板、30 个引擎参数未动。
+
+同机同协议：
+
+| 项 | 0.2.16 + 0.1.62 | 0.2.20 + 0.1.66 |
+|---|---:|---:|
+| prefill 6.2K | 2,760 t/s | **2,739 t/s**（−0.8%） |
+| prefill 12.8K | 4,747 t/s | **4,986 t/s**（+5.0%） |
+| 4 路聚合 | 174.3 / 188.5 / 185.9 t/s | **204.9 / 200.4 / 199.7 t/s** |
+| 每路 decode 中位 | 45.5 / 49.4 / 48.2 t/s | 52.8 / 52.4 / 52.5 t/s |
+| 单流 decode（low） | 133–135 t/s | **134.3 t/s** |
+
+并发聚合 +6~18%（中位 +7~10%），单流持平，prefill 长 prompt +5%。切替第一次在 11:24:27 就绪但首个请求即崩，回滚后加规避变量，11:28:17 重切、**11:28:45 就绪（28 s）**，验收 **24/24**。细节见 [STRATA-UPSTREAM-2026-11-23.md](docs/STRATA-UPSTREAM-2026-11-23.md)。
 
 ## 0.2.16 实测（v6.2，2026-11-19，引擎换代 + 目录布局）
 
@@ -114,21 +131,22 @@ v5.3 时期（2026-10-25）用 **vLLM 官方 benchmark** 重测了 prefill / dec
 | [Niko1221/Strata](https://github.com/Niko1221/Strata) | 上游只发 Windows 二进制 | 需 Linux 自建/调参（本文即这份记录） |
 | **本项目** | **单 4090 48GB** | ✅ |
 
-## 当前组合（v6.2，2026-11-19 起）
+## 当前组合（v6.3，2026-11-23 起）
 
 | 层 | 固定身份 |
 |---|---|
 | 模型 | `unsloth/Qwen3.8-Flash-Next-GGUF` → **UD-Q4_K_XL**（111.33 GB / 4 shards，4-bit；huihui-ai v2 消融 48 张量（档 1）） |
-| 引擎 | [Niko1221/Strata](https://github.com/Niko1221/Strata) **0.2.16 服务端 + 0.1.62 预编译引擎**（CUDA 13，arch 含 sm_89，sha256 与官方 `SHA256SUMS.txt` 一致 `6723e1b6…6cfb9e`） |
-| 目录 | 上游 0.2.16 是 `terminal/serve`；本机平铺成 `Strata-0.2.16/{serve,tools,strata_control,strata_cli}`，启动 `cd Strata-0.2.16 && python ./serve/server.py` |
+| 引擎 | [Niko1221/Strata](https://github.com/Niko1221/Strata) **0.2.20 服务端 + 0.1.66 预编译引擎**（CUDA 13，arch 含 sm_89，sha256 与官方 `SHA256SUMS.txt` 一致 `13c5bebe…5e059`） |
+| 目录 | 上游 0.2.20 是 `terminal/serve`；本机平铺成 `Strata-0.2.20/{serve,tools,strata_control,strata_cli}`，启动 `cd Strata-0.2.20 && python ./serve/server.py` |
+| 必需规避 | `env` 里 `STRATA_HC_Q8_TC=0` + `STRATA_HC_Q8_BF16TC=0`（0.1.66 在 sm_89 上的 `layer 0 never rang` 回归，上游 `#6742`，修复 PR `#6714` 未并入） |
 | 并发 / 上下文 | `--batch 4` × `--max-context 262144`（每 slot 独立 session） |
 | KV | **`k8v4` + `--kv-resident 32768`**（816 B/cell；KV 流式到宿主内存，4×256K 全放显存会 OOM） |
 | 破限 | **huihui-ai v2 消融补丁档 1**（`ssm_out` / `attn_output`，48/48 命中，不动 routed experts 与 FFN）；强探针 8/8 不拒答，性暴力露骨特写保留软边界（已确认接受） |
 | 图像 | 自带 vision 编码器（`mmproj-BF16.gguf` 0.91 GB，GPU 模式）；`--vram-reserve-mib 2560` |
 | Chat 模板 | **Sharp-naze v1.5**（34,422 B / 34,386 字符，2026-11-09 起）：`reasoning_effort` 全档位 + 工具调用修复；froggeric v22.5 备份在 pack 的 `chat_template.jinja.bak-20261109-froggeric225`，`reasoning_effort` 通路仍由服务端解析 |
-| GPU | 单 RTX 4090 **48GB** / sm89 / TP1；引擎报告 33,038 MiB 专家缓存 / 11,049 槽（空闲 2,517 MiB） |
+| GPU | 单 RTX 4090 **48GB** / sm89 / TP1；引擎报告 32,816 MiB 专家缓存 / 10,977 槽（空闲 2,651 MiB） |
 
-## 快速开始（v6.2）
+## 快速开始（v6.3）
 
 完整从零步骤（模型下载、pack、PLE 分片、模板、成功判据）见 [docs/REPRODUCTION.md](docs/REPRODUCTION.md)。
 最短路径（已有模型/pack 时）：
@@ -136,35 +154,36 @@ v5.3 时期（2026-10-25）用 **vLLM 官方 benchmark** 重测了 prefill / dec
 ```bash
 export https_proxy=http://127.0.0.1:7890
 
-# 1. 服务端源码（0.2.16）+ 官方预编译引擎（0.1.62）
-mkdir -p strata/Strata-0.2.16
+# 1. 服务端源码（0.2.20）+ 官方预编译引擎（0.1.66）
+mkdir -p strata/Strata-0.2.20
 # 源码 tarball 偶发截断；若 gzip 报 unexpected end of file，改用 GitHub tree API 逐文件取（见 docs/UPSTREAM 文档）
-curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.16.tar.gz \
-  | tar -xz -C strata/Strata-0.2.16 --strip-components=1
-# 0.2.16 的仓库顶层是 engine/ app/ terminal/ …；本机只把 terminal/{serve,tools,strata_control,strata_cli} 平铺到树根：
-#   cd strata/Strata-0.2.16 && mv terminal/serve terminal/tools terminal/strata_control terminal/strata_cli .
-gh release download v0.2.16 --repo Niko1221/Strata \
-  -p 'strata-engine-0.1.62-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
-mkdir -p strata/Strata-0.2.16/engine
-tar -xzf /tmp/strata-engine-0.1.62-linux-x86_64-cuda-cuda13.tar.gz -C strata/Strata-0.2.16/engine
-# sha256 期望 6723e1b6b6042bfe1d368723ebf873afb0fa65f4f1908d948dd865098f6cfb9e
+curl -L https://github.com/Niko1221/Strata/archive/refs/tags/v0.2.20.tar.gz \
+  | tar -xz -C strata/Strata-0.2.20 --strip-components=1
+# 0.2.20 的仓库顶层是 engine/ app/ terminal/ …；本机只把 terminal/{serve,tools,strata_control,strata_cli} 平铺到树根：
+#   cd strata/Strata-0.2.20 && mv terminal/serve terminal/tools terminal/strata_control terminal/strata_cli .
+gh release download v0.2.20 --repo Niko1221/Strata \
+  -p 'strata-engine-0.1.66-linux-x86_64-cuda-cuda13.tar.gz' -D /tmp
+mkdir -p strata/Strata-0.2.20/engine
+tar -xzf /tmp/strata-engine-0.1.66-linux-x86_64-cuda-cuda13.tar.gz -C strata/Strata-0.2.20/engine
+# sha256 期望 13c5bebeaf24574b02307857bce6abfd3f861f3682ca98dbe36c1c461fd5e059
 
 # 2. 模板（Sharp-naze v1.5，34422 B / 34386 字符；froggeric v22.5 留作历史）
 cp patches/sharp-naze_v1.5.jinja \
    <Strata-data>/packs/<pack>/tokenizer/chat_template.jinja
 
-# 3. 启动（必须在你自己的终端里跑；页缓存冷 106 秒、命中 53 秒；0.1.60 实测就绪 28–35 秒）
+# 3. 启动（必须在你自己的终端里跑；页缓存冷 106 秒、命中 53 秒；0.1.62/0.1.66 实测就绪 28–35 秒）
 nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 ```
 
+⚠️ **sm_89 必须加规避**：`strata-unsloth-q4kxl-ablit-l1-0220.json` 的 `env` 里 `STRATA_HC_Q8_TC=0` + `STRATA_HC_Q8_BF16TC=0`，否则首个请求就崩 `verify: layer 0 never rang`。
 ⚠️ **不要跑 `./setup.sh` / `update.sh`**：会重导原装模板（9,993 B）、重写 config（丢手调参数），
 0.1.44+ 还可能因 #2902 删模型分片。升级只换「服务端源码 + 引擎目录」。
-⚠️ 服务端 / 引擎 / vision 必须同代（0.2.15 ↔ 0.1.60；0.2.15 的引擎就是 0.2.14 那套文件，可直接软链复用）；从 agent 的 bash 工具里起进程会被 systemd cgroup 连坐。
+⚠️ 服务端 / 引擎 / vision 必须同代（0.2.20 ↔ 0.1.66；0.2.19 之后 engine 与 Control 共用版本号）；从 agent 的 bash 工具里起进程会被 systemd cgroup 连坐。
 ⚠️ 新建启动器后先 `chmod +x`——2026-11-16 的 7 分 24 秒停机就是漏了这一步（`systemd-run` 报「权限不够」）。
 
-## 上游：0.2.3 → 0.2.15 的结论
+## 上游：0.2.3 → 0.2.20 的结论
 
-**2026-11-17 已升级到 0.2.15 + 0.1.60**（见 [docs/STRATA-UPSTREAM-2026-11-17.md](docs/STRATA-UPSTREAM-2026-11-17.md)，上一版 [11-16](docs/STRATA-UPSTREAM-2026-11-16.md)、[11-08](docs/STRATA-UPSTREAM-2026-11-08.md)，更早的 [11-06](docs/STRATA-UPSTREAM-2026-11-06.md)、[11-03](docs/STRATA-UPSTREAM-2026-11-03.md)、[11-01](docs/STRATA-UPSTREAM-2026-11-01.md)、[10-28](docs/STRATA-UPSTREAM-2026-10-28.md)）：
+**2026-11-23 已升级到 0.2.20 + 0.1.66**（见 [docs/STRATA-UPSTREAM-2026-11-23.md](docs/STRATA-UPSTREAM-2026-11-23.md)；上一版 [11-19](docs/STRATA-UPSTREAM-2026-11-19.md)、[11-17](docs/STRATA-UPSTREAM-2026-11-17.md)、[11-16](docs/STRATA-UPSTREAM-2026-11-16.md)、[11-08](docs/STRATA-UPSTREAM-2026-11-08.md)、[11-06](docs/STRATA-UPSTREAM-2026-11-06.md)、[11-03](docs/STRATA-UPSTREAM-2026-11-03.md)、[11-01](docs/STRATA-UPSTREAM-2026-11-01.md)、[10-28](docs/STRATA-UPSTREAM-2026-10-28.md)）：
 
 - 0.2.5 / 0.2.6 对 Qwen 单卡零增量（0.2.6 的 Qwen 引擎与 0.2.5 逐字节相同）；0.2.7 是 0.2.2 之后第一个改到 sm_89 的版本。
 - **0.2.9 是第一个"默认开性能开关"的版本**，两条都命中本机：`--batch 4` 触发的**并行请求栈**（9 个 `STRATA_*`，上游 8 并发 1.45×）与 Linux CUDA Qwen 的 **GDN 张量核 prompt 内核**。
@@ -175,7 +194,9 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 - **v5.9 换的是模型，不是引擎**：0.2.12 + 0.1.58 不动，权重换 unsloth UD-Q4_K_XL + huihui v2 消融（档 1）；质量升、速度降，见 [STRATA-MODEL-2026-11-08.md](docs/STRATA-MODEL-2026-11-08.md)。11-09 模板又换成 Sharp-naze v1.5（34,386 字符）。
 - **0.2.13 没有单独升**（只把启动器默认值搬进引擎）；**0.2.14 一步到位**：Q4_K/Q5_K 专家的 prompt 从 llama.cpp MMQ 换到 Strata 自有融合内核（`-DSTRATA_MMQ=ON` 可回旧路径），日志 48/48 层；本机 prefill 6.2K +0.9%、12.8K **+3.3%**、20K 4,847 t/s、30K 4,939 t/s；并发与 0.1.58 空缓存口径持平。工具调用/思考泄漏（`#4751`/`#4077`/`#4949`）**一条没修**。见 [STRATA-UPSTREAM-2026-11-16.md](docs/STRATA-UPSTREAM-2026-11-16.md)。
 - **0.2.15 只动 serve 层、引擎没变**：app/Terminal/Control 0.1.61 与我们无关；真正相关的是 `#5979` 布尔工具参数解析与 `#6055` 关闭期 503 排水。复测 prefill/并发在 ±0.5% 内，验收 24/24。见 [STRATA-UPSTREAM-2026-11-17.md](docs/STRATA-UPSTREAM-2026-11-17.md)。
-- 回滚：IQ3_S 模型、pack 与 0.2.2–0.2.11 旧树**已物理删除**，回滚要重下 84 GB + 重建 pack；生产入口是 `run_strata_q4l1_0215.sh`（`run_strata.sh` 已改为指向它），回 0.2.14 改指 `run_strata_q4l1_0214.sh`，回 0.2.12 改指 `run_strata_q4l1.sh`；`run_strata_q4stock.sh` / `run_strata_q4kxl.sh` 保留作权重回退。
+- **0.2.16 = 引擎换代**：0.1.62 在 NVIDIA/AMD/Arc/Mac 上全部改跑 Strata 自有内核，不再用 ggml/llama.cpp 矩阵内核；`strata-vision` 从 53.8 MB 缩到 1.2 MB。本机 prefill 6.2K −1.5%、12.8K −1.3%（噪声内），4 路 174.3/188.5/185.9 持平；28 s 切替、24/24。仓库改 `terminal/` 布局（本机平铺）。见 [STRATA-UPSTREAM-2026-11-19.md](docs/STRATA-UPSTREAM-2026-11-19.md)。
+- **0.2.20 = 并发变快，但 sm_89 要规避**：`EXP_MODE=8` 融合专家 + INT8 dense 让 4 路聚合 **+6~18%**（174–188 → 200–205 t/s）、12.8K prefill **+5.0%**，单流持平。代价是 0.1.66 的 `#6742` 回归：`q8_ld16()` 用 `__ldg()` 读 `__shared__`，sm_80+ 默认开的 Q8 TC kernel 首个请求就崩 `verify: layer 0 never rang`；本机用 `STRATA_HC_Q8_TC=0` + `STRATA_HC_Q8_BF16TC=0` 绕开（修复 PR `#6714` 未并入）。另含 `#6431` 长 prompt NaN 修复。见 [STRATA-UPSTREAM-2026-11-23.md](docs/STRATA-UPSTREAM-2026-11-23.md)。
+- 回滚：IQ3_S 模型、pack 与 0.2.2–0.2.11 旧树**已物理删除**，回滚要重下 84 GB + 重建 pack；生产入口是 `run_strata_q4l1_0220.sh`（`run_strata.sh` 已改为指向它），回 0.2.16 改指 `run_strata_q4l1_0216.sh`，回 0.2.15 改指 `run_strata_q4l1_0215.sh`，回 0.2.12 改指 `run_strata_q4l1.sh`；`run_strata_q4stock.sh` / `run_strata_q4kxl.sh` 保留作权重回退。
 
 ## 边界与未验证
 
@@ -191,7 +212,8 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 
 | 版本 | 运行时 / 权重 | 一句话 |
 |---|---|---|
-| **v6.2（当前）** | Strata 0.2.16 + 0.1.62 / **unsloth UD-Q4_K_XL + huihui v2 破限档 1** | 引擎换代：0.1.62 改跑 Strata 自有内核、视觉读取器缩到 1.2 MB；仓库改 `terminal/` 布局（本机平铺）；prefill 2,760 / 4,747 t/s（−1.3~1.5%，噪声内）、4 路 174.3/188.5/185.9；28 s 切替、验收 24/24、工具调用正常 |
+| **v6.3（当前）** | Strata 0.2.20 + 0.1.66 / **unsloth UD-Q4_K_XL + huihui v2 破限档 1** | `EXP_MODE=8` 融合专家 + INT8 dense：4 路聚合 174–188 → **200–205 t/s**（+6~18%）、12.8K prefill +5.0%、单流持平；0.1.66 在 sm_89 崩 `layer 0 never rang`（`#6742`），用 `STRATA_HC_Q8_TC=0` + `STRATA_HC_Q8_BF16TC=0` 规避；28 s 切替、24/24 |
+| v6.2 | Strata 0.2.16 + 0.1.62 / **unsloth UD-Q4_K_XL + huihui v2 破限档 1** | 引擎换代：0.1.62 改跑 Strata 自有内核、视觉读取器缩到 1.2 MB；仓库改 `terminal/` 布局（本机平铺）；prefill 2,760 / 4,747 t/s（−1.3~1.5%，噪声内）、4 路 174.3/188.5/185.9；28 s 切替、验收 24/24、工具调用正常 |
 | v6.1 | Strata 0.2.15 + 0.1.60 / **unsloth UD-Q4_K_XL + huihui v2 破限档 1** | serve-only 小版本：引擎不变，拿 `#5979` 布尔工具参数 + `#6055` 关闭期 503；prefill 2,801 / 4,809 t/s、4 路 182.7/184.9/185.6，均在噪声内；验收 24/24 |
 | v6.0 | Strata 0.2.14 + 0.1.60 / **unsloth UD-Q4_K_XL + huihui v2 破限档 1** | prompt 走 Strata 自有内核：12.8K prefill +3.3%、20K 4,847 t/s；并发持平；模板 Sharp-naze v1.5（34,386 字符）；停机 7m24s（启动器漏 +x）、验收 23/23 |
 | v5.9 | Strata 0.2.12 + 0.1.58 / **unsloth UD-Q4_K_XL + huihui v2 破限** | 换模型：质量升（WorkBuddy 0.17→0.89、0→0.69），速度降（4 并发 215→186 t/s）；模板 11-09 换成 Sharp-naze v1.5；验收 31/31（旧脚本） |
@@ -215,10 +237,11 @@ nohup bash strata/run_strata.sh > strata/strata-prod.log 2>&1 &
 | [STRATA.md](docs/STRATA.md) | 为什么用 Strata、关键参数、KV/视觉/prefill 取舍 |
 | [REPRODUCTION.md](docs/REPRODUCTION.md) | 从零复现（含成功判据） |
 | [TEMPLATE.md](docs/TEMPLATE.md) | 合并模板：规则、词表、评测集、怎么改 |
-| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 症状 → 判据 → 修复（现行 29–52 + 通用项） |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 症状 → 判据 → 修复（现行 29–53 + 通用项） |
 | [HISTORY.md](docs/HISTORY.md) | 压缩版版本表与已删除项 |
 | [STRATA-MODEL-2026-11-08.md](docs/STRATA-MODEL-2026-11-08.md) | 换模型：UD-Q4_K_XL + huihui v2 消融、pack v4、速度/质量实测（模板沿革见文内 §5） |
-| [STRATA-UPSTREAM-2026-11-19.md](docs/STRATA-UPSTREAM-2026-11-19.md) | **当前版本怎么来的**：0.2.16 + 0.1.62 引擎换代、`terminal/` 布局与本机平铺、兼容性核对、28 s 切替、24/24、实测 |
+| [STRATA-UPSTREAM-2026-11-23.md](docs/STRATA-UPSTREAM-2026-11-23.md) | **当前版本怎么来的**：0.2.20 + 0.1.66、0.1.66 在 sm_89 的 `layer 0 never rang` 回归与规避、EXP_MODE=8 并发收益、两次切替时间线、24/24、实测 |
+| [STRATA-UPSTREAM-2026-11-19.md](docs/STRATA-UPSTREAM-2026-11-19.md) | 0.2.16 + 0.1.62 引擎换代、`terminal/` 布局与本机平铺、兼容性核对、28 s 切替、24/24、实测 |
 | [STRATA-UPSTREAM-2026-11-17.md](docs/STRATA-UPSTREAM-2026-11-17.md) | 0.2.15 升级：引擎不变、serve 两处修复（#5979 / #6055）、30 秒切替、24/24 |
 | [STRATA-UPSTREAM-2026-11-16.md](docs/STRATA-UPSTREAM-2026-11-16.md) | 0.2.14 升级：prompt 改走 Strata 内核、48/48 层、prefill/并发实测、7m24s 停机复盘、模板真相 |
 | [STRATA-UPSTREAM-2026-11-08.md](docs/STRATA-UPSTREAM-2026-11-08.md) | 0.2.12 升级评估：速度持平、工具调用 7 条修复、官方 FP8 模板 commit 是 no-op |
