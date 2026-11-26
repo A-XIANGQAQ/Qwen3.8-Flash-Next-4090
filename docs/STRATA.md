@@ -1,10 +1,10 @@
-# 路线：Strata（v6.3）
+# 路线：Strata（v6.4）
 
 把生产引擎从 v4（FreeToken + 3 个本地补丁）换成 [Niko1221/Strata](https://github.com/Niko1221/Strata)：
 一个自带 C++/CUDA 引擎，复用 llama.cpp 的 ggml/gguf-py/mtmd，做 MoE 专家分层（VRAM/RAM/SSD）、
 conversation cache、KV 流式与 MTP 投机解码。
 
-**当前固定身份**：Strata **0.2.20** 服务端 + **engine 0.1.66**（预编译，arch 含 sm_89；sm_89 需关 Q8 TC kernel）+ unsloth **UD-Q4_K_XL**（huihui v2 消融**档 1**）+ **Sharp-naze v1.5** 模板。
+**当前固定身份**：Strata **0.2.22** 服务端 + **engine 0.1.69**（预编译，arch 含 sm_89；`#6713` 已修，**不需要** Q8-TC 规避）+ unsloth **UD-Q4_K_XL**（huihui v2 消融**档 1**）+ **Sharp-naze v1.5** 模板。
 版本演进见 [HISTORY.md](HISTORY.md)，实测见 [BENCHMARK.md](BENCHMARK.md)，换模型见
 [STRATA-MODEL-2026-11-08.md](STRATA-MODEL-2026-11-08.md)，升级判断见 [STRATA-UPSTREAM-2026-11-08.md](STRATA-UPSTREAM-2026-11-08.md)。
 
@@ -48,7 +48,7 @@ conversation cache、KV 流式与 MTP 投机解码。
 - `carry_over()` 会重写 run config，**手工加进 `args` 的 12 个参数不会合并**
 - 0.1.44+ 的分片 SHA 校验有 #2902（大分片误判并删文件）
 
-**必须整代配对**：`serve/server.py`（0.2.20）+ `engine/strata` + `engine/strata-vision`（0.1.66）同代；0.2.16 起服务端在 `terminal/serve/`，本机平铺在 `Strata-0.2.20/serve/`；sm_89 还要在 config `env` 里关 Q8 TC kernel（见 OPERATIONS §1.3）。
+**必须整代配对**：`serve/server.py`（0.2.22）+ `engine/strata` + `engine/strata-vision`（0.1.69）同代；0.2.16 起服务端在 `terminal/serve/`，本机平铺在 `Strata-0.2.22/serve/`；0.2.21 起 sm_89 的 Q8 TC 回归已修，config 不再需要规避（见 OPERATIONS §1.3）。
 只换其中一个不报错，但会静默降级（[TROUBLESHOOTING #39](TROUBLESHOOTING.md)）。
 
 ## 4. 关键参数
@@ -124,20 +124,20 @@ DavidAU 的 29 段模式合并模板（249,545 B）只用于复现 v5.3–v5.8�
 启动/停止/升级：[OPERATIONS.md](OPERATIONS.md)。三层判据缺一不可：
 
 1. 进程：`pgrep -x strata` + `:8000` 在听
-2. 版本/模板：`/props.build_info == "Strata 0.1.66"`，`chat_template` 长度 **34386**
+2. 版本/模板：`/props.build_info == "Strata 0.1.69"`，`chat_template` 长度 **34386**
 3. 端到端：一条中文请求正文可读；`/metrics` 的 `live.state` 回到 `idle`
 
 破限判据：来自 huihui v2 消融（48 张量，档 1），**不该**出现 ESP 控制向量行；8 条探针（6 对抗 + 2 对照）8/8 不拒答。
 
 ## 11. 已验证 / 未验证
 
-**已在 v6.3（0.2.20 + 0.1.66 + UD-Q4_K_XL）上验证**：
+**已在 v6.4（0.2.22 + 0.1.69 + UD-Q4_K_XL）上验证**：
 
 - **历史口径**（2026-10-25，IQ3_S + 0.1.47，vLLM 基准，不代表 v5.9）：1K / 8K / 32K / 64K / 128K / 260K prefill 与 1K / 32K / 128K / 260K decode，2–4 路并发；见 [BENCHMARK.md](BENCHMARK.md) §1–§9
 - v5.9 实际复测范围：6.25K / 12.7K prompt、4 路 512-token 并发、单流 default/low（见下条）
 - 4×256K 配置与 KV 流式；`k8v4`；`--batch-mtp` 并发
-- 视觉三色条 3/3（0.1.45 时代，样本小）；专家缓存 **32,595 MiB / 10,902 槽**；arena **73,450 MiB**（专家全驻 RAM）；启动后空闲显存 2,517 MiB
-- **0.2.9 的 11 个新默认环境变量逐个在引擎进程里确认生效**（9 并行 + 2 GDN），0.2.12 上仍是同一组；0.2.13 起默认值搬进引擎、服务端不再注入；`drafting = mtp`；**v6.3 验收 24/24（0.2.20 + 0.1.66）**；0.1.66 上 6.2K prompt 2,739 t/s（−0.8%）、12.8K 4,986 t/s（**+5.0%**），4 并发 **200–205 t/s**（+6~18%），单流 134.3 t/s 持平
+- 视觉三色条 3/3（0.1.45 时代，样本小）；专家缓存 **32,816 MiB / 10,977 槽** / arena **73,450 MiB**（专家全驻 RAM）/ 启动后空闲显存 **2,651 MiB**（0.2.20–0.2.22 口径；0.1.58 时代是 33,603 MiB / 17,283 槽）
+- **0.2.9 的 11 个新默认环境变量逐个在引擎进程里确认生效**（9 并行 + 2 GDN），0.2.12 上仍是同一组；0.2.13 起默认值搬进引擎、服务端不再注入；`drafting = mtp`；**v6.4 验收 24/24（0.2.22 + 0.1.69，Q8-TC 规避已删）**；0.1.69 上 6.2K prompt 2,777 t/s（+1.4%）、12.8K 5,003 t/s（+0.3%），4 并发 **202–208 t/s**（+0.7~1.9%），单流 ~130/134 t/s 持平
 - 0.2.11 引入、0.1.58/0.1.60 仍为 **FP16 weight cache 0 MiB**（需分配后留 3,072 MiB 空闲，本机余 ~2,900 MiB），因此上游 4 路 +5.7% 未复现；`pcie_frac` 由 0.55 变为按 CPU 实测的 **0.15**
 - 0.1.43.1 曾连续跑 2 天 23 小时（被 cgroup 连带杀，不是自崩）
 

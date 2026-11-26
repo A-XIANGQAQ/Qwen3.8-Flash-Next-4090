@@ -6,7 +6,8 @@
 
 | 版本 | 时间 | 引擎 / 权重 | 一句话结果 | 状态 |
 |---|---|---|---|---|
-| **v6.3** | 2026-11-23 | **Strata 0.2.20 + engine 0.1.66** / **unsloth UD-Q4_K_XL + huihui-ai v2 消融档 1** | `EXP_MODE=8` 融合专家（13 组 Unsloth 专家对）+ 10 种 INT8 dense：4 并发聚合 174–188 → **200–205 t/s**（+6~18%）、12.8K prefill 4,747 → **4,986 t/s**（+5.0%）、6.2K −0.8%、单流 134.3 t/s 持平；**0.1.66 在 sm_89 崩 `layer 0 never rang`**（`fused_gr.cu` 的 `__ldg()` 读 `__shared__`，上游 `#6742`，修复 PR `#6714` 未并入），用 `STRATA_HC_Q8_TC=0` + `STRATA_HC_Q8_BF16TC=0` 规避；另补 `aliases: [Qwen3.8-Flash-Next, qwen3.8-flash-next-q4kxl-ablit]`（0.2.20 `#6621` 严格模型名，DSH/Cherry 旧名恢复）；第一次切替 2m10s 后回滚、第二次 28 s 就绪、验收 24/24，见 [STRATA-UPSTREAM-2026-11-23.md](STRATA-UPSTREAM-2026-11-23.md) | ✅ 当前 |
+| **v6.4** | 2026-11-26 | **Strata 0.2.22 + engine 0.1.69** / **unsloth UD-Q4_K_XL + huihui-ai v2 消融档 1** | 0.2.21 `#6713` 修 sm_89 的 `layer 0 never rang`（原 `#6742`）⇒ 删掉两个 Q8-TC 规避变量并验证；0.2.22 `#6776` 精度修复、`#7070` MTP 采样恢复。prefill 6.2K 2,738.5→**2,776.8 t/s**（+1.4%）、12.8K 4,986.2→**5,003.1 t/s**（+0.3%）、4 路 200–205→**201–208 t/s**，单流持平；28 s 切替、验收 24/24，见 [STRATA-UPSTREAM-2026-11-26.md](STRATA-UPSTREAM-2026-11-26.md) | ✅ 当前 |
+| v6.3 | 2026-11-23 | **Strata 0.2.20 + engine 0.1.66** / **unsloth UD-Q4_K_XL + huihui-ai v2 消融档 1** | `EXP_MODE=8` 融合专家（13 组 Unsloth 专家对）+ 10 种 INT8 dense：4 并发聚合 174–188 → **200–205 t/s**（+6~18%）、12.8K prefill 4,747 → **4,986 t/s**（+5.0%）、6.2K −0.8%、单流 134.3 t/s 持平；**0.1.66 在 sm_89 崩 `layer 0 never rang`**（`fused_gr.cu` 的 `__ldg()` 读 `__shared__`，上游 `#6742`，修复 PR `#6714` 未并入），用 `STRATA_HC_Q8_TC=0` + `STRATA_HC_Q8_BF16TC=0` 规避；另补 `aliases: [Qwen3.8-Flash-Next, qwen3.8-flash-next-q4kxl-ablit]`（0.2.20 `#6621` 严格模型名，DSH/Cherry 旧名恢复）；第一次切替 2m10s 后回滚、第二次 28 s 就绪、验收 24/24，见 [STRATA-UPSTREAM-2026-11-23.md](STRATA-UPSTREAM-2026-11-23.md) | 被 v6.4 取代 |
 | v6.2 | 2026-11-19 | **Strata 0.2.16 + engine 0.1.62** / **unsloth UD-Q4_K_XL + huihui-ai v2 消融档 1** | 引擎换代：0.1.62 的 NVIDIA/AMD/Arc/Mac 全部改跑 Strata 自有矩阵内核（不再用 ggml/llama.cpp），`strata-vision` 从 125.9 MB 缩到 1.2 MB；仓库改 `engine/ app/ terminal/ docs/ tools/` 布局（本机平铺 `serve/`）；pack v4 直接可读、30 个参数不变；6.2K prompt 2,760 t/s、12.8K 4,747 t/s（−1.3~1.5%，噪声内）、4 并发 174.3/188.5/185.9；切替 28 s、验收 24/24，见 [STRATA-UPSTREAM-2026-11-19.md](STRATA-UPSTREAM-2026-11-19.md) | 被 v6.3 取代 |
 | v6.1 | 2026-11-17 | **Strata 0.2.15 + engine 0.1.60** / **unsloth UD-Q4_K_XL + huihui-ai v2 消融档 1** | serve 层小版本：引擎与 0.1.60 逐字节相同，实际拿到 `frontend.py` **#5979**（布尔工具参数 `True`/`False` 解析）与 `server.py` **#6055**（关闭期新请求回 503 排水）；复测 6.2K prompt 2,801 t/s、12.8K 4,809 t/s、4 并发 182.7/184.9/185.6（±0.5% 噪声内）；切替 35 s 无事故、验收 24/24，见 [STRATA-UPSTREAM-2026-11-17.md](STRATA-UPSTREAM-2026-11-17.md) | 被 v6.2 取代 |
 | **v6.0** | 2026-11-16 | **Strata 0.2.14 + engine 0.1.60** / **unsloth UD-Q4_K_XL + huihui-ai v2 消融档 1** | Q4_K/Q5_K 专家的 prompt 从 llama.cpp MMQ 换到 Strata 自有融合内核（日志 48/48 层）：6.2K prompt 2,770→**2,795 t/s**、12.8K 4,631→**4,783 t/s**（+3.3%）、20K 4,847、30K 4,939；4 并发 175–187 t/s 与 0.1.58 空缓存口径持平；模板 Sharp-naze v1.5（34,386 字符）、验收 23/23；**停机 7m24s**（启动器漏 `chmod +x`），见 [STRATA-UPSTREAM-2026-11-16.md](STRATA-UPSTREAM-2026-11-16.md) | 被 v6.1 取代 |
@@ -25,7 +26,7 @@
 | v2 | 2026-09-14 | Lsglang 0.5.19-lkmoe + PR #37500 | 首次在单 4090 上跑通 Flash-Next | ⛔ 运行时已删 |
 | v1 | — | Lsglang 1.4.13 + lk_moe 2.4.0 | 早期能起服务，长上下文不可用 | ⛔ 运行时已删 |
 
-## 为什么从 v5.3 一路走到 v6.3
+## 为什么从 v5.3 一路走到 v6.4
 
 - **v5.4（0.2.7）**：0.2.3–0.2.6 对 Qwen 单卡无增量（0.2.6 的 Qwen 引擎与 0.2.5 逐字节相同）；0.2.7 是 0.2.2 之后第一个动 sm_89 的版本
   （实测速度表，结果 bit-for-bit 不变）+ `#1503` 会话缓存跨会话、`#3602` 读表挂死等修复。见 [STRATA-UPSTREAM-2026-10-28.md](STRATA-UPSTREAM-2026-10-28.md)。
@@ -50,6 +51,7 @@
   引擎二进制从 315.7 MB 降到 177.7 MB。日志确认 `48 of 48 layers on the fused kernels`；同协议实测 6.2K prompt +0.9%、12.8K **+3.3%**、20K 4,847 t/s、30K 4,939 t/s，
   并发与 0.1.58 空缓存口径持平。0.2.13 没有单独升（只是把启动器默认值搬进引擎）。工具调用/思考泄漏 `#4751`/`#4077`/`#4949` **仍未修**。
   代价是一次 7m24s 停机：新启动器漏了 `chmod +x`，`systemd-run` 报「权限不够」。见 [STRATA-UPSTREAM-2026-11-16.md](STRATA-UPSTREAM-2026-11-16.md)。
+- **v6.4（0.2.22 + 0.1.69）**：0.2.21 修掉了 v6.3 的坑——`#6713` 修 sm_89 上 `q8_ld16()` 用 `__ldg()` 读共享内存的回归（即 `#6742`），本机删掉 `STRATA_HC_Q8_TC` / `STRATA_HC_Q8_BF16TC` 两个规避变量后 24/24，Q8 超连接的 TC 路径重新打开。0.2.22 另有 `#6776`（Qwen prompt 读取一处求和顺序精度修复，首 token 不变）与 `#7070`（开 MTP 时恢复采样：不显式给采样就按模型卡 temp 1.0 / top_p 0.95 / top_k 20，不再静默变贪心）。同协议实测 prefill 6.2K 2,738.5→**2,776.8 t/s**（+1.4%）、12.8K 4,986.2→**5,003.1 t/s**（+0.3%）、4 路 200–205→**201–208 t/s**（+0.7~1.9%），单流持平；28 s 切替。见 [STRATA-UPSTREAM-2026-11-26.md](STRATA-UPSTREAM-2026-11-26.md)。
 - **v6.3（0.2.20）**：引擎 0.1.62 → 0.1.66，NVIDIA 侧拿到 `EXP_MODE=8` 融合专家与 INT8 dense，4 路聚合 +6~18%、12.8K prefill +5.0%，单流持平；代价是 `#6742` 在 sm_89 上把 Q8 超连接的 TC kernel 打挂，关掉 `STRATA_HC_Q8_TC`/`STRATA_HC_Q8_BF16TC` 后正常。见 [STRATA-UPSTREAM-2026-11-23.md](STRATA-UPSTREAM-2026-11-23.md)。
 - **v6.1（0.2.15）**：app/Terminal/Control 版本，**引擎没动**（官方仍从 0.2.14 release 拿 0.1.60）。我们直跑 serve，实际只有两处相关修复：`frontend.py` `#5979`（模型把声明的布尔工具参数写成 `True`/`False` 时正确解析）、`server.py` `#6055`（关闭期新请求回 503 `server_draining`，不再切 0 token）。部署上把 `Strata-0.2.15/engine` 软链到 0.2.14 的引擎目录，config 只改 4 个字段。见 [STRATA-UPSTREAM-2026-11-17.md](STRATA-UPSTREAM-2026-11-17.md)。
 - **遗留**：`#3952`（sm_89 + 262144 ctx + `--spec 4` 的 VRAM 崩塌报告）仍 open；我们靠 `--vram-reserve-mib 2560` + `--kv-resident 32768` 维持 ~2,480 MiB 余量。

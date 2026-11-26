@@ -1,6 +1,6 @@
 # 排障手册 (Troubleshooting)
 
-> 只保留 **v6.3（Strata 0.2.20 + engine 0.1.66 + unsloth UD-Q4_K_XL 档 1 + Sharp-naze v1.5）** 仍适用的条目；sm_89 的 Q8 TC 规避见 #53。
+> 只保留 **v6.4（Strata 0.2.22 + engine 0.1.69 + unsloth UD-Q4_K_XL 档 1 + Sharp-naze v1.5）** 仍适用的条目；sm_89 的 Q8-TC 历史回归见 #53（0.2.21 起已修）。
 > v1–v4 的坑（编号 1–10、13–17、19–28）已随运行时删除，需要时看 git 历史。
 > 严重度：🔴 会停服 / 🟡 性能或质量受损 / 🔵 认知陷阱 / 🟢 测量与操作习惯。
 
@@ -151,7 +151,7 @@ CUDA error: out of memory
   静默降级——旧 server 会按「引擎太老/太新」处理，不报错，只少给功能。
 - 判据：`engine/BUILD.json` 的 `version`、`engine/strata --version`、`/props` 的 `build_info`、
   `serve/server.py` 里 `PARALLEL_MAX`、`setup.py` 里 `MIN_ENGINE` 应当指向同一代。
-  本站当前已知可用配对：**服务端 0.2.20 + 引擎 0.1.66**（`/props.build_info = "Strata 0.1.66"`，config `env` 关 Q8 TC）；0.2.16 + 0.1.62 保留作上一代回滚；更早的旧树已删除、回退需重下。
+  本站当前已知可用配对：**服务端 0.2.22 + 引擎 0.1.69**（`/props.build_info = "Strata 0.1.69"`，config 无需 Q8-TC 规避）；0.2.20 + 0.1.66（需两个 Q8-TC 变量）与 0.2.16 + 0.1.62 保留作回滚；更早的旧树已删除、回退需重下。
 - 修法：整套换。见 [OPERATIONS.md](OPERATIONS.md) §1c。
 
 ## 🔴 40. 别让 `update.sh` / `setup.py` 碰你的模型分片
@@ -357,21 +357,21 @@ done
 
 ---
 
-## 🔵 52. 0.2.16 起 `serve/` 在哪，为什么 `Strata-0.2.20/terminal` 不存在
+## 🔵 52. 0.2.16 起 `serve/` 在哪，为什么 `Strata-0.2.22/terminal` 不存在
 
-上游 0.2.16 起把服务端搬进 `terminal/serve/`（顶层还有 `engine/`、`app/`、`docs/`、`tools/`），0.2.20 不变。
-本机是**平铺**部署：只取 `terminal/{serve,tools,strata_control,strata_cli}` 放到 `Strata-0.2.20/` 根下，
-启动器 `cd Strata-0.2.20 && python ./serve/server.py`。所以：
+上游 0.2.16 起把服务端搬进 `terminal/serve/`（顶层还有 `engine/`、`app/`、`docs/`、`tools/`），0.2.22 不变。
+本机是**平铺**部署：只取 `terminal/{serve,tools,strata_control,strata_cli}` 放到 `Strata-0.2.22/` 根下，
+启动器 `cd Strata-0.2.22 && python ./serve/server.py`。所以：
 
-- 找源码：`strata/Strata-0.2.20/serve/server.py`（不是 `terminal/serve/server.py`）；
-- 找工具：`strata/Strata-0.2.20/tools/iq_pack.py`；
+- 找源码：`strata/Strata-0.2.22/serve/server.py`（不是 `terminal/serve/server.py`）；
+- 找工具：`strata/Strata-0.2.22/tools/iq_pack.py`；
 - 想按上游原样放也行，但 config 的 `cwd` 要指到 `terminal/`，`vision.exe`/`exe` 仍指 `engine/`。
 
 ⚠️ 不要跑 `setup.py` / `update.sh` / `--update`：会把设置与引擎搬进 `terminal/`、把模型移到克隆旁 `Strata-data`。
 
 ---
 
-## 🔵 53. 0.1.66 在 sm_89 首个请求崩 `layer 0 never rang`
+## 🔵 53. 0.1.66 在 sm_89 首个请求崩 `layer 0 never rang`（0.2.21 已修）
 
 判据：`/health`、`/props`、`/metrics` 全正常，`build_info "Strata 0.1.66"`，但任何生成都返回
 
@@ -380,8 +380,10 @@ done
 ```
 
 引擎日志先有 `STRATA_HC_Q8=1: 0.63 GiB of Q8_0 hyper-connection projections`，再有 `verify: captured the 4-token window`，然后 `layer 0 never rang`。
-这是上游 `#6742`（`fused_gr.cu` 的 `q8_ld16()` 用 `__ldg()` 读 `__shared__`，sm_80+ 的 Q8 TC kernel 触发；修复 PR `#6714` 未并入）。
-修复：config 的 `env` 加 `STRATA_HC_Q8_TC=0` + `STRATA_HC_Q8_BF16TC=0`，重启即好；`STRATA_HC_Q8=0` 也可但多占 0.63 GiB、Q8 read 走慢路径。
+这是 0.1.66 的回归（`fused_gr.cu` 的 `q8_ld16()` 用 `__ldg()` 读 `__shared__`，sm_80+ 的 Q8 TC kernel 触发；上游 `#6742`）。
+
+**0.2.21 的 `#6713` 已修**：v6.4（0.2.22 + 0.1.69）已从 config `env` 删除 `STRATA_HC_Q8_TC=0` / `STRATA_HC_Q8_BF16TC=0`，
+启动日志 `STRATA_HC_Q8=1` 且无 `never rang`，验收 24/24。只有回滚到 0.2.20 + 0.1.66 时才需要把这两行加回去。
 
 ## 🔵 54. 客户端报 `model 'Qwen3.8-Flash-Next' is not loaded; currently serving '…'`
 
